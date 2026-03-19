@@ -97,7 +97,7 @@ export class ChannelsService {
   /**
    * 获取频道详情
    */
-  async findOne(id: string): Promise<ChannelDetail> {
+  async findOne(id: string): Promise<any> {
     const channel = await this.prisma.channel.findUnique({
       where: { id },
       include: {
@@ -120,9 +120,11 @@ export class ChannelsService {
       throw new NotFoundException('Channel not found');
     }
 
+    const { password, _count, ...rest } = channel;
     return {
-      ...channel,
-      participantCount: channel._count.members,
+      ...rest,
+      participantCount: _count.members,
+      hasPassword: !!password,
     };
   }
 
