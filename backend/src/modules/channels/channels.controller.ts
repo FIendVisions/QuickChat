@@ -64,10 +64,9 @@ export class ChannelsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   async create(
-    @CurrentUser() user: User,
     @Body() createChannelDto: CreateChannelDto,
   ) {
-    return this.channelsService.create(user.id, createChannelDto);
+    return this.channelsService.create(createChannelDto.userId, createChannelDto);
   }
 
   /**
@@ -110,11 +109,11 @@ export class ChannelsController {
   @Post(':id/join')
   @HttpCode(HttpStatus.OK)
   async join(
-    @CurrentUser() user: User,
     @Param('id') channelId: string,
     @Body() joinChannelDto: JoinChannelDto,
   ) {
-    return this.channelsService.join(user.id, channelId, joinChannelDto);
+    const userId = joinChannelDto.userId || 'anonymous';
+    return this.channelsService.join(userId, channelId, joinChannelDto);
   }
 
   /**
@@ -125,10 +124,11 @@ export class ChannelsController {
   @Post(':id/leave')
   @HttpCode(HttpStatus.NO_CONTENT)
   async leave(
-    @CurrentUser() user: User,
     @Param('id') channelId: string,
+    @Body() body: { userId?: string },
   ) {
-    return this.channelsService.leave(user.id, channelId);
+    const userId = body?.userId || 'anonymous';
+    return this.channelsService.leave(userId, channelId);
   }
 
   /**

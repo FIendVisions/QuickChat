@@ -34,7 +34,7 @@ export class ChannelsService {
    * 获取频道列表（分页 + 筛选）
    */
   async findAll(query: QueryChannelDto): Promise<{ channels: ChannelListItem[]; total: number }> {
-    const { type, page = 1, pageSize = 20 } = query;
+    const { type, userId, page = 1, pageSize = 50 } = query;
     const skip = (page - 1) * pageSize;
 
     const where: any = {};
@@ -42,29 +42,34 @@ export class ChannelsService {
       where.type = type;
     }
 
-    // 查询频道和参与人数
+    // 如果指定了 userId，对 PRIVATE 频道只返回用户参与的
+    if (userId && (!type || type === ChannelType.PRIVATE)) {
+      where.OR = [
+        { type: ChannelType.PUBLIC },
+        {
+          type: ChannelType.PRIVATE,
+          members: { some: { userId } },
+        },
+      ];
+      delete where.type;
+    }
+
+    const channelInclude = {
+      owner: {
+        select: { id: true, username: true, avatar: true },
+      },
+      _count: {
+        select: { members: true },
+      },
+    };
+
     const [channels, total] = await Promise.all([
       this.prisma.channel.findMany({
         where,
         skip,
         take: pageSize,
-        include: {
-          owner: {
-            select: {
-              id: true,
-              username: true,
-              avatar: true,
-            },
-          },
-          _count: {
-            select: {
-              members: true,
-            },
-          },
-        },
-        orderBy: {
-          createdAt: 'desc',
-        },
+        include: channelInclude,
+        orderBy: { createdAt: 'desc' },
       }),
       this.prisma.channel.count({ where }),
     ]);
@@ -85,7 +90,7 @@ export class ChannelsService {
       updatedAt: channel.updatedAt,
     }));
 
-    this.logger.log(`Found ${total} channels`);
+    this.logger.log(`Found ${total} channels (userId filter: ${userId || 'none'})`);
     return { channels: channelList, total };
   }
 
@@ -125,102 +130,41 @@ export class ChannelsService {
    * 创建频道
    */
   async create(userId: string, dto: CreateChannelDto): Promise<ChannelDetail> {
-    // 验证私有频道的特有字段
-    if (dto.type === ChannelType.PRIVATE) {
-      // 私有频道必须有最大人数限制
-      if (!dto.maxParticipants) {
-        dto.maxParticipants = 10; // 默认 10 人
-      }
+    // 确保创建者在数据库中存在
+    await this.ensureUserExists(userId, dto.username);
 
-      // 如果设置了密码，进行加密
-      let hashedPassword: string | undefined;
-      if (dto.password) {
-        const salt = await bcrypt.genSalt(10);
-        hashedPassword = await bcrypt.hash(dto.password, salt);
-      }
-
-      // 创建私有频道
-      const channel = await this.prisma.channel.create({
-        data: {
-          name: dto.name,
-          type: dto.type,
-          ownerId: userId,
-          description: dto.description,
-          maxParticipants: dto.maxParticipants,
-          password: hashedPassword,
-        },
-        include: {
-          owner: {
-            select: {
-              id: true,
-              username: true,
-              avatar: true,
-            },
-          },
-          _count: {
-            select: {
-              members: true,
-            },
-          },
-        },
-      });
-
-      // 创建者自动加入频道
-      await this.addMember(channel.id, userId);
-
-      this.logger.log(`Created private channel: ${channel.id} by user ${userId}`);
-
-      // 广播频道创建事件
-      this.websocketGateway.broadcast('channel:created', {
-        ...channel,
-        participantCount: 1,
-      });
-
-      return {
-        ...channel,
-        participantCount: 1,
-      };
+    // 加密密码（两种类型都可以设置密码）
+    let hashedPassword: string | undefined;
+    if (dto.password) {
+      const salt = await bcrypt.genSalt(10);
+      hashedPassword = await bcrypt.hash(dto.password, salt);
     }
 
-    // 创建公共频道（无密码，无人数限制）
     const channel = await this.prisma.channel.create({
       data: {
         name: dto.name,
         type: dto.type,
         ownerId: userId,
         description: dto.description,
+        maxParticipants: dto.type === ChannelType.PRIVATE ? (dto.maxParticipants || 50) : null,
+        password: hashedPassword,
       },
       include: {
-        owner: {
-          select: {
-            id: true,
-            username: true,
-            avatar: true,
-          },
-        },
-        _count: {
-          select: {
-            members: true,
-          },
-        },
+        owner: { select: { id: true, username: true, avatar: true } },
+        _count: { select: { members: true } },
       },
     });
 
-    // 创建者自动加入频道
     await this.addMember(channel.id, userId);
 
-    this.logger.log(`Created public channel: ${channel.id} by user ${userId}`);
+    this.logger.log(`Created ${dto.type} channel: ${channel.id} by user ${userId}`);
 
-    // 广播频道创建事件
     this.websocketGateway.broadcast('channel:created', {
       ...channel,
       participantCount: 1,
     });
 
-    return {
-      ...channel,
-      participantCount: 1,
-    };
+    return { ...channel, participantCount: 1 };
   }
 
   /**
@@ -323,6 +267,9 @@ export class ChannelsService {
    * 加入频道
    */
   async join(userId: string, channelId: string, dto: JoinChannelDto): Promise<JoinChannelResponse> {
+    // 确保用户存在
+    await this.ensureUserExists(userId, dto.username);
+
     // 查询频道
     const channel = await this.prisma.channel.findUnique({
       where: { id: channelId },
@@ -353,23 +300,20 @@ export class ChannelsService {
       throw new ConflictException('You are already in this channel');
     }
 
-    // 私有频道验证
-    if (channel.type === ChannelType.PRIVATE) {
-      // 验证密码
-      if (channel.password) {
-        if (!dto.password) {
-          throw new ForbiddenException('This channel requires a password');
-        }
-        const isPasswordValid = await bcrypt.compare(dto.password, channel.password);
-        if (!isPasswordValid) {
-          throw new ForbiddenException('Invalid password');
-        }
+    // 密码验证（两种类型都可能有密码）
+    if (channel.password) {
+      if (!dto.password) {
+        throw new ForbiddenException('This channel requires a password');
       }
+      const isPasswordValid = await bcrypt.compare(dto.password, channel.password);
+      if (!isPasswordValid) {
+        throw new ForbiddenException('Invalid password');
+      }
+    }
 
-      // 验证人数限制
-      if (channel.maxParticipants && channel._count.members >= channel.maxParticipants) {
-        throw new ForbiddenException('Channel is full');
-      }
+    // 人数限制验证
+    if (channel.maxParticipants && channel._count.members >= channel.maxParticipants) {
+      throw new ForbiddenException('Channel is full');
     }
 
     // 添加成员
@@ -631,5 +575,27 @@ export class ChannelsService {
     this.logger.log(`📡 [BROADCAST] Message ${message.id} (seq: ${sequence}) sent to ${recipientCount} recipient(s)`);
 
     return message;
+  }
+
+  /**
+   * 确保用户在数据库中存在，如不存在则自动创建
+   */
+  private async ensureUserExists(userId: string, username?: string): Promise<void> {
+    let dbUser = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (dbUser) return;
+
+    if (username) {
+      dbUser = await this.prisma.user.findUnique({ where: { username } });
+      if (dbUser) return;
+    }
+
+    this.logger.log(`Auto-creating user ${userId} (${username || 'unknown'})`);
+    await this.prisma.user.create({
+      data: {
+        id: userId,
+        username: username || `user-${userId.slice(0, 8)}`,
+        status: 'ONLINE',
+      },
+    });
   }
 }
