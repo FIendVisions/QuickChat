@@ -3,23 +3,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Crown, Shield, User as UserIcon, ShieldOff, Trash2 } from 'lucide-react';
-import { ChannelMember } from '@/types/channel.types';
+import { Crown, Shield, ChevronRight, ChevronLeft, Users } from 'lucide-react';
+
+interface MemberInfo {
+  userId: string;
+  username: string;
+  avatar?: string;
+  joinedAt: string;
+  isOnline: boolean;
+  role?: string;
+}
 
 interface ChannelMembersProps {
   channelId: string;
   userId: string;
-  token?: string;
   isOwner: boolean;
 }
 
-/**
- * 频道成员列表组件
- * 显示频道成员，提供管理功能
- */
-export function ChannelMembers({ channelId, userId, token, isOwner }: ChannelMembersProps) {
-  const [members, setMembers] = useState<ChannelMember[]>([]);
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+
+export function ChannelMembers({ channelId, userId, isOwner }: ChannelMembersProps) {
+  const [members, setMembers] = useState<MemberInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     loadMembers();
@@ -28,11 +34,10 @@ export function ChannelMembers({ channelId, userId, token, isOwner }: ChannelMem
   const loadMembers = async () => {
     setLoading(true);
     try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
       const response = await fetch(`${API_URL}/channels/${channelId}/members`);
       if (response.ok) {
         const data = await response.json();
-        setMembers(data.members || []);
+        setMembers(Array.isArray(data) ? data : (data.members || []));
       }
     } catch (error) {
       console.error('Failed to load members:', error);
@@ -41,144 +46,78 @@ export function ChannelMembers({ channelId, userId, token, isOwner }: ChannelMem
     }
   };
 
-  const setMemberRole = async (userId: string, role: 'ADMIN' | 'MEMBER') => {
-    try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-      const response = await fetch(`${API_URL}/channels/${channelId}/members/${userId}/role`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role }),
-      });
+  const onlineCount = members.filter(m => m.isOnline).length;
 
-      if (response.ok) {
-        loadMembers(); // 重新加载成员列表
-      } else {
-        alert('设置权限失败');
-      }
-    } catch (error) {
-      console.error('Failed to set role:', error);
-      alert('设置权限失败');
-    }
-  };
-
-  const removeMember = async (userId: string, username: string) => {
-    if (!confirm(`确定要移除 ${username} 吗？`)) return;
-
-    try {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-      const response = await fetch(`${API_URL}/channels/${channelId}/members/${userId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        loadMembers();
-        alert('成员已移除');
-      } else {
-        alert('移除成员失败');
-      }
-    } catch (error) {
-      console.error('Failed to remove member:', error);
-      alert('移除成员失败');
-    }
-  };
-
-  if (loading) {
+  if (collapsed) {
     return (
-      <div className="p-4">
-        <div className="text-center text-text-muted">加载中...</div>
-      </div>
+      <button
+        onClick={() => setCollapsed(false)}
+        className="flex items-center gap-1 px-2 py-1.5 text-text-muted hover:text-text-normal transition-colors"
+        title="展开成员列表"
+      >
+        <ChevronLeft size={14} />
+        <Users size={14} />
+        <span className="text-xs">{members.length}</span>
+      </button>
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
-      {/* 标题 */}
-      <div className="p-4 border-b border-border-color">
-        <h3 className="text-sm font-bold text-text-normal">频道成员</h3>
-        <p className="text-xs text-text-muted mt-1">共 {members.length} 人</p>
+    <div className="flex flex-col h-full w-48 border-l border-border-color bg-bg-secondary">
+      {/* header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border-color">
+        <div className="flex items-center gap-1.5">
+          <Users size={12} className="text-text-muted" />
+          <span className="text-xs font-medium text-text-muted">
+            成员 {members.length}
+          </span>
+          <span className="text-[10px] text-success">● {onlineCount}</span>
+        </div>
+        <button
+          onClick={() => setCollapsed(true)}
+          className="text-text-muted hover:text-text-normal transition-colors"
+          title="收起"
+        >
+          <ChevronRight size={14} />
+        </button>
       </div>
 
-      {/* 成员列表 */}
-      <div className="flex-1 overflow-y-auto p-2">
-        {members.map((member) => (
-          <div
-            key={member.id}
-            className="flex items-center gap-2 p-2 rounded hover:bg-bg-secondary transition-colors"
-          >
-            {/* 头像 */}
-            <div className="relative flex-shrink-0">
-              {member.avatar ? (
-                <img
-                  src={member.avatar}
-                  alt={member.username}
-                  className="w-8 h-8 rounded-full"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-bg-tertiary flex items-center justify-center text-sm">
-                  {member.username.charAt(0).toUpperCase()}
+      {loading ? (
+        <div className="p-3 text-xs text-text-muted animate-pulse">加载中...</div>
+      ) : (
+        <div className="flex-1 overflow-y-auto py-1">
+          {members.map((member) => (
+            <div
+              key={member.userId}
+              className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover/50 transition-colors"
+            >
+              {/* avatar + online dot */}
+              <div className="relative flex-shrink-0">
+                <div className="w-6 h-6 rounded-full bg-bg-tertiary flex items-center justify-center text-[10px] text-text-muted font-medium">
+                  {(member.username || '?').charAt(0).toUpperCase()}
                 </div>
-              )}
-              
-              {/* 在线状态 */}
-              <div className={`absolute -bottom-0.5 -right-0.5 flex h-3 w-3`}>
-                <div className={`h-3 w-3 rounded-full border-2 border-bg-primary ${
-                  member.isOnline ? 'bg-success' : 'bg-text-muted'
-                }`} />
+                <div
+                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-[1.5px] border-bg-secondary ${
+                    member.isOnline ? 'bg-success' : 'bg-text-muted/40'
+                  }`}
+                />
               </div>
-            </div>
 
-            {/* 用户信息 */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1">
-                <p className="text-sm font-medium text-text-normal truncate">
-                  {member.username}
+              {/* name + id */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-text-normal truncate">{member.username}</span>
+                  {member.role === 'OWNER' && <Crown size={10} className="text-warning flex-shrink-0" />}
+                  {member.role === 'ADMIN' && <Shield size={10} className="text-primary flex-shrink-0" />}
+                </div>
+                <p className="text-[10px] text-text-muted/60 truncate font-mono leading-tight">
+                  {member.userId.length > 12 ? member.userId.slice(0, 12) + '…' : member.userId}
                 </p>
-                {member.role === 'OWNER' && (
-                  <Crown size={12} className="text-warning flex-shrink-0" />
-                )}
-                {member.role === 'ADMIN' && (
-                  <Shield size={12} className="text-primary flex-shrink-0" />
-                )}
               </div>
-              
-              {/* 状态标签 */}
-              {member.status === 'PENDING' && (
-                <p className="text-xs text-warning">待审核</p>
-              )}
             </div>
-
-            {/* 操作按钮 (仅创建者可见) */}
-            {isOwner && member.userId !== userId && (
-              <div className="flex items-center gap-1">
-                {member.role === 'ADMIN' ? (
-                  <button
-                    onClick={() => setMemberRole(member.userId, 'MEMBER')}
-                    className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-text-normal transition-colors"
-                    title="移除管理员"
-                  >
-                    <ShieldOff size={14} />
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => setMemberRole(member.userId, 'ADMIN')}
-                    className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-primary transition-colors"
-                    title="设为管理员"
-                  >
-                    <Shield size={14} />
-                  </button>
-                )}
-                <button
-                  onClick={() => removeMember(member.userId, member.username)}
-                  className="p-1.5 rounded hover:bg-bg-tertiary text-text-muted hover:text-danger transition-colors"
-                  title="移除成员"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -34,16 +34,18 @@ export class ChannelsService {
    * 获取频道列表（分页 + 筛选）
    */
   async findAll(query: QueryChannelDto): Promise<{ channels: ChannelListItem[]; total: number }> {
-    const { type, userId, page = 1, pageSize = 50 } = query;
+    const { type, userId, myOnly, page = 1, pageSize = 50 } = query;
     const skip = (page - 1) * pageSize;
+    const isMyOnly = myOnly === 'true';
 
     const where: any = {};
     if (type) {
       where.type = type;
     }
 
-    // 如果指定了 userId，对 PRIVATE 频道只返回用户参与的
-    if (userId && (!type || type === ChannelType.PRIVATE)) {
+    if (isMyOnly && userId) {
+      where.members = { some: { userId } };
+    } else if (userId && (!type || type === ChannelType.PRIVATE)) {
       where.OR = [
         { type: ChannelType.PUBLIC },
         {
@@ -79,6 +81,7 @@ export class ChannelsService {
       name: channel.name,
       type: channel.type as ChannelType,
       description: channel.description,
+      ownerId: channel.ownerId,
       owner: {
         id: channel.owner.id,
         username: channel.owner.username,
@@ -187,23 +190,14 @@ export class ChannelsService {
       throw new ForbiddenException('You are not the owner of this channel');
     }
 
-    // 准备更新数据
     const updateData: any = {};
     if (dto.name !== undefined) updateData.name = dto.name;
     if (dto.description !== undefined) updateData.description = dto.description;
+    if ((dto as any).type !== undefined) updateData.type = (dto as any).type;
     if (dto.maxParticipants !== undefined) {
-      // 公共频道不能设置人数限制
-      if (channel.type === ChannelType.PUBLIC) {
-        throw new ForbiddenException('Public channels cannot have participant limits');
-      }
       updateData.maxParticipants = dto.maxParticipants;
     }
     if (dto.password !== undefined) {
-      // 公共频道不能设置密码
-      if (channel.type === ChannelType.PUBLIC) {
-        throw new ForbiddenException('Public channels cannot have passwords');
-      }
-      // 加密新密码
       if (dto.password) {
         const salt = await bcrypt.genSalt(10);
         updateData.password = await bcrypt.hash(dto.password, salt);
@@ -345,40 +339,42 @@ export class ChannelsService {
    * 退出频道
    */
   async leave(userId: string, channelId: string): Promise<void> {
-    // 验证成员身份
     const member = await this.prisma.channelMember.findUnique({
-      where: {
-        channelId_userId: {
-          channelId,
-          userId,
-        },
-      },
+      where: { channelId_userId: { channelId, userId } },
     });
 
     if (!member) {
       throw new NotFoundException('You are not in this channel');
     }
 
-    // 删除成员
-    await this.prisma.channelMember.delete({
-      where: {
-        channelId_userId: {
-          channelId,
-          userId,
-        },
-      },
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { ownerId: true },
     });
 
-    // 如果频道没有成员了，删除频道（可选）
+    await this.prisma.channelMember.delete({
+      where: { channelId_userId: { channelId, userId } },
+    });
+
     const remainingCount = await this.prisma.channelMember.count({
       where: { channelId },
     });
 
     if (remainingCount === 0) {
-      await this.prisma.channel.delete({
-        where: { id: channelId },
-      });
+      await this.prisma.channel.delete({ where: { id: channelId } });
       this.logger.log(`Deleted empty channel: ${channelId}`);
+    } else if (channel?.ownerId === userId) {
+      const nextOwner = await this.prisma.channelMember.findFirst({
+        where: { channelId },
+        orderBy: { joinedAt: 'asc' },
+      });
+      if (nextOwner) {
+        await this.prisma.channel.update({
+          where: { id: channelId },
+          data: { ownerId: nextOwner.userId },
+        });
+        this.logger.log(`Transferred ownership of ${channelId} to ${nextOwner.userId}`);
+      }
     }
 
     this.logger.log(`User ${userId} left channel ${channelId}`);
@@ -387,7 +383,12 @@ export class ChannelsService {
   /**
    * 获取频道成员列表
    */
-  async getMembers(channelId: string): Promise<ChannelMemberInfo[]> {
+  async getMembers(channelId: string): Promise<(ChannelMemberInfo & { role: string })[]> {
+    const channel = await this.prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { ownerId: true },
+    });
+
     const members = await this.prisma.channelMember.findMany({
       where: { channelId },
       include: {
@@ -411,6 +412,7 @@ export class ChannelsService {
       avatar: member.user.avatar,
       joinedAt: member.joinedAt,
       isOnline: member.user.status !== 'OFFLINE',
+      role: member.user.id === channel?.ownerId ? 'OWNER' : 'MEMBER',
     }));
   }
 

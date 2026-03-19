@@ -10,12 +10,13 @@ import { PasswordPromptModal } from './PasswordPromptModal';
 import { JoinChannelModal } from './JoinChannelModal';
 import { Channel, ChannelType } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
-import { Plus, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, LogIn, ChevronDown, ChevronRight, Globe, Users } from 'lucide-react';
 
 interface ChannelListProps {
   userId: string;
   token?: string;
   onChannelSelect?: (channel: Channel) => void;
+  onBrowsePublicChannels?: () => void;
 }
 
 const OFFICIAL_CHANNEL: Channel = {
@@ -26,13 +27,12 @@ const OFFICIAL_CHANNEL: Channel = {
   ownerId: 'system',
   participantCount: 0,
   hasPassword: false,
-  requiresApproval: false,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
 
-export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps) {
-  const { publicChannels, privateChannels, isLoading, refetch } = useChannel(userId);
+export function ChannelList({ userId, token, onChannelSelect, onBrowsePublicChannels }: ChannelListProps) {
+  const { publicChannels, privateChannels, channels, isLoading } = useChannel(userId, { myOnly: true });
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -41,20 +41,17 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
   const [error, setError] = useState<string | null>(null);
 
   const [officialExpanded, setOfficialExpanded] = useState(true);
-  const [publicExpanded, setPublicExpanded] = useState(true);
-  const [privateExpanded, setPrivateExpanded] = useState(true);
+  const [myChannelsExpanded, setMyChannelsExpanded] = useState(true);
+
+  const officialFromApi = channels.find(ch => ch.id === 'public-official');
+  const officialChannel: Channel = officialFromApi || OFFICIAL_CHANNEL;
+
+  const myChannels = channels.filter(ch => ch.id !== 'public-official');
 
   const handleChannelClick = async (channel: Channel) => {
     setError(null);
-
-    if (channel.id === 'public-official') {
-      onChannelSelect?.(channel);
-      return;
-    }
-
     try {
       await channelApi.join(channel.id);
-      onChannelSelect?.(channel);
     } catch (error: any) {
       if (error.message?.includes('password') || error.message?.includes('密码')) {
         if (channel.hasPassword) {
@@ -63,9 +60,8 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
           return;
         }
       }
-      // "already in channel" 等情况，直接选中
-      onChannelSelect?.(channel);
     }
+    onChannelSelect?.(channel);
   };
 
   const handleCreateChannel = async (data: {
@@ -112,7 +108,6 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
     try {
       const channel = await channelApi.getById(channelId);
       if (channel) {
-        // 加入后刷新列表，让私密频道出现在列表中
         window.dispatchEvent(new CustomEvent('channelsChanged'));
         onChannelSelect?.(channel);
       } else {
@@ -152,11 +147,10 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
             className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-bg-tertiary hover:bg-bg-hover text-text-muted hover:text-text-normal transition-all text-sm"
           >
             <LogIn size={16} />
-            通过ID加入私密频道
+            通过ID加入频道
           </button>
         </div>
 
-        {/* 频道列表 */}
         <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
           {/* --- 官方频道 --- */}
           <SectionHeader
@@ -166,61 +160,45 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
           />
           {officialExpanded && (
             <div className="space-y-0.5 ml-1">
-              <ChannelItem
-                channel={OFFICIAL_CHANNEL}
-                onClick={handleChannelClick}
-              />
+              <ChannelItem channel={officialChannel} onClick={handleChannelClick} />
             </div>
           )}
 
-          {/* --- 公开频道 --- */}
+          {/* --- 公开频道（按钮，点击在聊天区展示） --- */}
+          <button
+            onClick={() => onBrowsePublicChannels?.()}
+            className="w-full flex items-center gap-2 px-2 py-2 mt-2 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-normal transition-colors group"
+          >
+            <Globe size={14} className="text-success group-hover:text-success" />
+            <span className="text-xs font-semibold uppercase">公开频道</span>
+            <ChevronRight size={12} className="ml-auto" />
+          </button>
+
+          {/* --- 我的频道 --- */}
           <SectionHeader
-            title="公开频道"
-            count={publicChannels.length}
-            expanded={publicExpanded}
-            onToggle={() => setPublicExpanded(!publicExpanded)}
+            title="我的频道"
+            count={myChannels.length}
+            expanded={myChannelsExpanded}
+            onToggle={() => setMyChannelsExpanded(!myChannelsExpanded)}
           />
-          {publicExpanded && (
+          {myChannelsExpanded && (
             <div className="space-y-0.5 ml-1">
-              {publicChannels.length > 0 ? (
-                publicChannels.map((channel) => (
+              {myChannels.length > 0 ? (
+                myChannels.map((channel) => (
                   <ChannelItem
                     key={channel.id}
                     channel={channel}
                     onClick={handleChannelClick}
+                    showTypeBadge
                   />
                 ))
               ) : (
-                <p className="px-3 py-2 text-xs text-text-muted">暂无公开频道</p>
-              )}
-            </div>
-          )}
-
-          {/* --- 私密频道 --- */}
-          <SectionHeader
-            title="私密频道"
-            count={privateChannels.length}
-            expanded={privateExpanded}
-            onToggle={() => setPrivateExpanded(!privateExpanded)}
-          />
-          {privateExpanded && (
-            <div className="space-y-0.5 ml-1">
-              {privateChannels.length > 0 ? (
-                privateChannels.map((channel) => (
-                  <ChannelItem
-                    key={channel.id}
-                    channel={channel}
-                    onClick={handleChannelClick}
-                  />
-                ))
-              ) : (
-                <p className="px-3 py-2 text-xs text-text-muted">暂无私密频道</p>
+                <p className="px-3 py-2 text-xs text-text-muted">创建或加入频道后显示在这里</p>
               )}
             </div>
           )}
         </div>
 
-        {/* 错误提示 */}
         {error && (
           <div className="mx-2 mb-2 p-2 bg-danger/10 border border-danger/50 rounded text-sm text-danger">
             {error}
@@ -235,7 +213,6 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
           onCreate={handleCreateChannel}
         />
       )}
-
       {showPasswordModal && selectedChannel && (
         <PasswordPromptModal
           channelName={selectedChannel.name}
@@ -243,7 +220,6 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
           onSubmit={handlePasswordSubmit}
         />
       )}
-
       {showJoinModal && (
         <JoinChannelModal
           onClose={() => { setShowJoinModal(false); setError(null); }}
@@ -255,12 +231,7 @@ export function ChannelList({ userId, token, onChannelSelect }: ChannelListProps
   );
 }
 
-function SectionHeader({
-  title,
-  count,
-  expanded,
-  onToggle,
-}: {
+function SectionHeader({ title, count, expanded, onToggle }: {
   title: string;
   count?: number;
   expanded: boolean;
@@ -274,9 +245,7 @@ function SectionHeader({
       {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       <span>{title}</span>
       {count !== undefined && (
-        <span className="ml-auto text-[10px] bg-bg-tertiary px-1.5 py-0.5 rounded-full">
-          {count}
-        </span>
+        <span className="ml-auto text-[10px] bg-bg-tertiary px-1.5 py-0.5 rounded-full">{count}</span>
       )}
     </button>
   );

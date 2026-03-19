@@ -22,6 +22,11 @@ export class QueryChannelDto {
   @IsInt()
   page?: number = 1;
 
+  @ApiPropertyOptional({ description: '仅返回用户已加入的频道', default: false })
+  @IsOptional()
+  @IsString()
+  myOnly?: string;
+
   @ApiPropertyOptional({ description: '每页数量', default: 50 })
   @IsOptional()
   @Type(() => Number)

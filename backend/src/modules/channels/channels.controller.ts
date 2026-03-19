@@ -74,31 +74,27 @@ export class ChannelsController {
    * PATCH /channels/:id
    * 只有频道所有者可以更新
    */
-  @ApiOperation({ summary: '更新频道', description: '只有频道所有者可以更新' })
+  @ApiOperation({ summary: '更新频道（需在 body 中传 userId）' })
   @Patch(':id')
-  @UseGuards(ChannelOwnerGuard)
   async update(
-    @CurrentUser() user: User,
     @Param('id') channelId: string,
-    @Body() updateChannelDto: UpdateChannelDto,
+    @Body() updateChannelDto: UpdateChannelDto & { userId: string },
   ) {
-    return this.channelsService.update(user.id, channelId, updateChannelDto);
+    return this.channelsService.update(updateChannelDto.userId, channelId, updateChannelDto);
   }
 
   /**
    * 删除频道
    * DELETE /channels/:id
-   * 只有频道所有者可以删除
    */
-  @ApiOperation({ summary: '删除频道', description: '只有频道所有者可以删除' })
-  @Delete(':id')
-  @UseGuards(ChannelOwnerGuard)
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '删除频道（需在 body 中传 userId）' })
+  @Post(':id/delete')
+  @HttpCode(HttpStatus.OK)
   async remove(
-    @CurrentUser() user: User,
     @Param('id') channelId: string,
+    @Body() body: { userId: string },
   ) {
-    return this.channelsService.remove(user.id, channelId);
+    return this.channelsService.remove(body.userId, channelId);
   }
 
   /**

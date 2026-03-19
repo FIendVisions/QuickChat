@@ -1,7 +1,8 @@
 // backend/src/modules/channels/dto/update-channel.dto.ts
 
-import { IsString, IsOptional, IsNumber, Min, Max, Length } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEnum, Min, Max, Length } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ChannelType } from '../../../common/types';
 
 /**
  * 更新频道 DTO
@@ -16,6 +17,11 @@ export class UpdateChannelDto {
   @IsString()
   @Length(2, 50, { message: '频道名称长度必须在 2-50 字符之间' })
   name?: string;
+
+  @ApiPropertyOptional({ description: '频道类型', enum: ChannelType })
+  @IsOptional()
+  @IsEnum(ChannelType)
+  type?: ChannelType;
 
   @ApiPropertyOptional({
     description: '频道描述',

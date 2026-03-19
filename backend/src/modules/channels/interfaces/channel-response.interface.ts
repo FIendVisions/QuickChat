@@ -23,6 +23,7 @@ export interface ChannelListItem {
   name: string;
   type: ChannelType;
   description?: string;
+  ownerId: string;
   owner: {
     id: string;
     username: string;

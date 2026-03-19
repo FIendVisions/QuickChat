@@ -28,20 +28,25 @@ export const channelApi = {
   /**
    * 获取所有频道（传入 userId 时，私密频道只返回用户参与的）
    */
-  async getAll(userId?: string): Promise<Channel[]> {
+  async getAll(userId?: string, options?: { myOnly?: boolean }): Promise<Channel[]> {
     const params = new URLSearchParams();
     if (userId) params.set('userId', userId);
+    if (options?.myOnly) params.set('myOnly', 'true');
     const url = `${API_URL}/channels${params.toString() ? '?' + params.toString() : ''}`;
     const response = await fetch(url, { headers: getAuthHeaders() });
     const data = await handleResponse(response);
-    return data.channels || [];
+    return (data.channels || []).map((ch: any) => ({
+      ...ch,
+      ownerId: ch.ownerId || ch.owner?.id,
+    }));
   },
 
   async getById(id: string): Promise<Channel> {
     const response = await fetch(`${API_URL}/channels/${id}`, {
       headers: getAuthHeaders(),
     });
-    return handleResponse(response);
+    const data = await handleResponse(response);
+    return { ...data, ownerId: data.ownerId || data.owner?.id };
   },
 
   async create(data: {
@@ -73,6 +78,29 @@ export const channelApi = {
       body: JSON.stringify({ userId, username, password }),
     });
     return handleResponse(response);
+  },
+
+  async update(id: string, data: { name?: string; description?: string; password?: string; type?: string }): Promise<Channel> {
+    const userId = localStorage.getItem('userId') || '';
+    const response = await fetch(`${API_URL}/channels/${id}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ ...data, userId }),
+    });
+    return handleResponse(response);
+  },
+
+  async delete(id: string): Promise<void> {
+    const userId = localStorage.getItem('userId') || '';
+    const response = await fetch(`${API_URL}/channels/${id}/delete`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ userId }),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => null);
+      throw new Error(err?.message || '删除频道失败');
+    }
   },
 
   async leave(id: string): Promise<void> {

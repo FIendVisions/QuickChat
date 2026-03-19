@@ -8,12 +8,12 @@ import { ChannelMembers } from '@/components/channel/ChannelMembers';
 import { MessageList, MessageListRef } from '@/components/message/MessageList';
 import { MessageInput } from '@/components/message/MessageInput';
 import { ChannelSettingsModal } from '@/components/channel/ChannelSettingsModal';
+import { PublicChannelBrowser } from '@/components/channel/PublicChannelBrowser';
 import { AuthModal } from '@/components/auth/AuthModal';
-import { DatabaseManager } from '@/components/admin/DatabaseManager';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { Channel } from '@/types/channel.types';
+import { channelApi } from '@/services/api/channel.api';
 import { createUser, validateUser } from '@/lib/authStorage';
-import { Settings as SettingsIcon, X } from 'lucide-react';
 
 export default function HomePage() {
   const [user, setUser] = useState<{ id: string; username: string; email?: string } | null>(null);
@@ -22,12 +22,13 @@ export default function HomePage() {
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showDBManager, setShowDBManager] = useState(false);
+  const [browsingPublicChannels, setBrowsingPublicChannels] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isOfficialChannel, setIsOfficialChannel] = useState(false);
   const messageListRef = useRef<MessageListRef>(null);
 
-  // 检查登录状态
+  const isOfficialChannel = selectedChannel?.id === 'public-official';
+  const isOwner = selectedChannel?.ownerId === user?.id;
+
   useEffect(() => {
     try {
       const savedToken = localStorage.getItem('token');
@@ -37,7 +38,6 @@ export default function HomePage() {
       if (savedToken && savedUserId && savedUsername) {
         setUser({ id: savedUserId, username: savedUsername });
         setToken(savedToken);
-        // 自动选择公共频道
         setSelectedChannel({
           id: 'public-official',
           name: '公共频道',
@@ -46,11 +46,9 @@ export default function HomePage() {
           ownerId: 'system',
           participantCount: 0,
           hasPassword: false,
-          requiresApproval: false,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
-        setIsOfficialChannel(true);
       }
     } catch (err) {
       console.error('Failed to load auth state:', err);
@@ -61,16 +59,10 @@ export default function HomePage() {
 
   const handleLogin = async (username: string, password: string) => {
     try {
-      // 使用本地存储验证
       const user = validateUser(username, password);
+      if (!user) throw new Error('用户名或密码错误');
 
-      if (!user) {
-        throw new Error('用户名或密码错误');
-      }
-
-      // 生成简单的token
       const token = `token-${user.id}-${Date.now()}`;
-
       localStorage.setItem('token', token);
       localStorage.setItem('userId', user.id);
       localStorage.setItem('username', user.username);
@@ -78,22 +70,11 @@ export default function HomePage() {
 
       setUser({ id: user.id, username: user.username, email: user.email });
       setToken(token);
-
-      // 自动选择公共频道
       setSelectedChannel({
-        id: 'public-official',
-        name: '公共频道',
-        type: 'PUBLIC' as any,
-        description: '官方频道 - 所有用户自动加入',
-        ownerId: 'system',
-        participantCount: 0,
-        hasPassword: false,
-        requiresApproval: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
+        description: '官方频道', ownerId: 'system', participantCount: 0,
+        hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
-      setIsOfficialChannel(true);
-
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -104,12 +85,8 @@ export default function HomePage() {
 
   const handleRegister = async (username: string, email: string, password: string) => {
     try {
-      // 使用本地存储创建用户
       const newUser = createUser(username, email, password);
-
-      // 生成简单的token
       const token = `token-${newUser.id}-${Date.now()}`;
-
       localStorage.setItem('token', token);
       localStorage.setItem('userId', newUser.id);
       localStorage.setItem('username', newUser.username);
@@ -117,22 +94,11 @@ export default function HomePage() {
 
       setUser({ id: newUser.id, username: newUser.username, email: newUser.email });
       setToken(token);
-
-      // 自动选择公共频道
       setSelectedChannel({
-        id: 'public-official',
-        name: '公共频道',
-        type: 'PUBLIC' as any,
-        description: '官方频道 - 所有用户自动加入',
-        ownerId: 'system',
-        participantCount: 0,
-        hasPassword: false,
-        requiresApproval: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
+        description: '官方频道', ownerId: 'system', participantCount: 0,
+        hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
-      setIsOfficialChannel(true);
-
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -149,33 +115,40 @@ export default function HomePage() {
     setUser(null);
     setToken(null);
     setSelectedChannel(null);
-    setIsOfficialChannel(false);
+    setBrowsingPublicChannels(false);
     setError(null);
   };
 
-  const handleChannelSelect = (channel: Channel) => {
-    setSelectedChannel(channel);
-    // 检查是否是官方公共频道
-    setIsOfficialChannel(channel.id === 'public-official');
+  const handleChannelSelect = async (channel: Channel) => {
+    setBrowsingPublicChannels(false);
+    if (channel.id === 'public-official') {
+      setSelectedChannel(channel);
+      return;
+    }
+    try {
+      const fresh = await channelApi.getById(channel.id);
+      setSelectedChannel(fresh);
+    } catch {
+      setSelectedChannel(channel);
+    }
   };
 
-  const handleLeaveChannel = () => {
+  const handleLeaveChannel = async () => {
+    if (!selectedChannel || selectedChannel.id === 'public-official') return;
+    try {
+      await channelApi.leave(selectedChannel.id);
+    } catch (err) {
+      // ignore if not a member
+    }
     setSelectedChannel(null);
-    setIsOfficialChannel(false);
+    window.dispatchEvent(new CustomEvent('channelsChanged'));
   };
 
   const handleDeleteChannel = async (channelId: string) => {
-    console.log('Deleting channel:', channelId);
     setSelectedChannel(null);
-    setIsOfficialChannel(false);
-    window.location.reload();
+    window.dispatchEvent(new CustomEvent('channelsChanged'));
   };
 
-  const handleUpdatePassword = async (channelId: string, newPassword: string) => {
-    console.log('Updating password for channel:', channelId);
-  };
-
-  // 显示加载状态
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center bg-bg-primary">
@@ -187,7 +160,6 @@ export default function HomePage() {
     );
   }
 
-  // 未登录状态
   if (!user) {
     return (
       <div className="flex h-screen items-center justify-center bg-bg-primary">
@@ -201,13 +173,9 @@ export default function HomePage() {
           >
             开始使用
           </button>
-
           {showAuthModal && (
             <AuthModal
-              onClose={() => {
-                setShowAuthModal(false);
-                setError(null);
-              }}
+              onClose={() => { setShowAuthModal(false); setError(null); }}
               onLogin={handleLogin}
               onRegister={handleRegister}
             />
@@ -217,206 +185,171 @@ export default function HomePage() {
     );
   }
 
-  const isOwner = selectedChannel?.ownerId === user.id;
-
   return (
     <WebSocketProvider userId={user.id} token={token || undefined}>
       <div className="flex h-screen flex-col bg-bg-primary">
-        {/* 顶部导航 */}
         <TopBar
           username={user.username}
           onLogout={handleLogout}
-          onOpenDBManager={() => setShowDBManager(true)}
         />
 
-      {/* 主内容区 */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* 左侧边栏 - 频道列表 */}
-        <div className="w-60 bg-bg-secondary">
-          <ChannelList
-            userId={user.id}
-            token={token || undefined}
-            onChannelSelect={handleChannelSelect}
-          />
-        </div>
-
-        {/* 中间 - 聊天区域 */}
-        <div className="flex flex-1 flex-col">
-          {selectedChannel ? (
-            <>
-              {/* 频道标题栏 */}
-              <div className="flex h-12 items-center justify-between border-b border-border-color bg-bg-tertiary px-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">
-                    {selectedChannel.type === 'PUBLIC' ? '#' : '🔒'}
-                  </span>
-                  <h2 className="font-semibold text-text-normal">
-                    {selectedChannel.name}
-                  </h2>
-                  {selectedChannel.requiresApproval && (
-                    <span className="rounded-full bg-yellow-500/20 px-2 py-0.5 text-xs text-yellow-500">
-                      需审核
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {isOwner && (
-                    <button
-                      onClick={() => setShowSettings(true)}
-                      className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
-                    >
-                      ⚙️
-                    </button>
-                  )}
-                  {!isOfficialChannel && (
-                    <button
-                      onClick={handleLeaveChannel}
-                      className="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-text-muted hover:bg-bg-hover hover:text-text-normal"
-                    >
-                      🚪 退出
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* 消息列表 */}
-              <div className="flex-1 overflow-y-auto">
-                <MessageList
-                  ref={messageListRef}
-                  channelId={selectedChannel.id}
-                  userId={user.id}
-                />
-              </div>
-
-              {/* 消息输入 */}
-              <div className="border-t border-border-color bg-bg-tertiary p-4">
-                <MessageInput
-                  channelId={selectedChannel.id}
-                  currentUserId={user.id}
-                  currentUsername={user.username}
-                  onSend={async (content) => {
-                    const tempId = `temp-${Date.now()}-${Math.random()}`;
-
-                    messageListRef.current?.addMessage({
-                      id: tempId,
-                      channelId: selectedChannel.id,
-                      userId: user.id,
-                      username: user.username,
-                      content,
-                      type: 'TEXT',
-                      createdAt: new Date().toISOString(),
-                    });
-
-                    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/channels/${selectedChannel.id}/messages`, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        ...(token && { 'Authorization': `Bearer ${token}` }),
-                      },
-                      body: JSON.stringify({
-                        content,
-                        userId: user.id,
-                        username: user.username,
-                      }),
-                    });
-
-                    if (!response.ok) {
-                      const error = await response.json();
-                      throw new Error(error.message || '发送失败');
-                    }
-
-                    const result = await response.json();
-
-                    // 如果后端返回的 userId 与前端不一致，同步为后端的 userId
-                    const backendUserId = result.userId;
-                    if (backendUserId && backendUserId !== user.id) {
-                      localStorage.setItem('userId', backendUserId);
-                      setUser(prev => prev ? { ...prev, id: backendUserId } : prev);
-                    }
-
-                    messageListRef.current?.replaceTemp(tempId, {
-                      id: result.id,
-                      channelId: result.channelId,
-                      userId: backendUserId || user.id,
-                      username: result.user?.username || user.username,
-                      avatar: result.user?.avatar,
-                      content: result.content,
-                      type: result.type || 'TEXT',
-                      createdAt: result.createdAt,
-                    });
-                  }}
-                />
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center text-center">
-              <div className="mb-4 text-5xl">💬</div>
-              <p className="mb-2 text-lg text-text-normal">选择一个频道开始聊天</p>
-              <p className="text-sm text-text-muted">从左侧列表中选择频道</p>
-            </div>
-          )}
-        </div>
-
-        {/* 右侧边栏 - 频道成员 */}
-        {selectedChannel && (
-          <div className="w-60 bg-bg-secondary border-l border-border-color">
-            <ChannelMembers
-              channelId={selectedChannel.id}
+        <div className="flex flex-1 overflow-hidden">
+          {/* 左侧边栏 */}
+          <div className="w-60 bg-bg-secondary">
+            <ChannelList
               userId={user.id}
-              isOwner={isOwner}
+              token={token || undefined}
+              onChannelSelect={handleChannelSelect}
+              onBrowsePublicChannels={() => {
+                setBrowsingPublicChannels(true);
+                setSelectedChannel(null);
+              }}
             />
           </div>
-        )}
-      </div>
-    </div>
 
-      {/* 底部状态栏 */}
+          {/* 中间+右侧区域 */}
+          <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 flex-col">
+              {browsingPublicChannels ? (
+                <PublicChannelBrowser
+                  userId={user.id}
+                  onChannelSelect={handleChannelSelect}
+                />
+              ) : selectedChannel ? (
+                <>
+                  {/* 频道标题栏 */}
+                  <div className="flex h-12 items-center justify-between border-b border-border-color bg-bg-tertiary px-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">
+                        {selectedChannel.type === 'PUBLIC' ? '#' : '🔒'}
+                      </span>
+                      <h2 className="font-semibold text-text-normal">{selectedChannel.name}</h2>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isOwner && !isOfficialChannel && (
+                        <button
+                          onClick={() => setShowSettings(true)}
+                          className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal text-sm"
+                        >
+                          ⚙️
+                        </button>
+                      )}
+                      {!isOfficialChannel && (
+                        <button
+                          onClick={handleLeaveChannel}
+                          className="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-text-muted hover:bg-bg-hover hover:text-text-normal"
+                        >
+                          🚪 退出
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 消息列表 */}
+                  <div className="flex-1 overflow-y-auto">
+                    <MessageList
+                      ref={messageListRef}
+                      channelId={selectedChannel.id}
+                      userId={user.id}
+                    />
+                  </div>
+
+                  {/* 消息输入 */}
+                  <div className="border-t border-border-color bg-bg-tertiary p-4">
+                    <MessageInput
+                      channelId={selectedChannel.id}
+                      currentUserId={user.id}
+                      currentUsername={user.username}
+                      onSend={async (content) => {
+                        const tempId = `temp-${Date.now()}-${Math.random()}`;
+                        messageListRef.current?.addMessage({
+                          id: tempId,
+                          channelId: selectedChannel.id,
+                          userId: user.id,
+                          username: user.username,
+                          content,
+                          type: 'TEXT',
+                          createdAt: new Date().toISOString(),
+                        });
+
+                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/channels/${selectedChannel.id}/messages`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            ...(token && { 'Authorization': `Bearer ${token}` }),
+                          },
+                          body: JSON.stringify({
+                            content,
+                            userId: user.id,
+                            username: user.username,
+                          }),
+                        });
+
+                        if (!response.ok) {
+                          const err = await response.json();
+                          throw new Error(err.message || '发送失败');
+                        }
+
+                        const result = await response.json();
+                        const backendUserId = result.userId;
+                        if (backendUserId && backendUserId !== user.id) {
+                          localStorage.setItem('userId', backendUserId);
+                          setUser(prev => prev ? { ...prev, id: backendUserId } : prev);
+                        }
+
+                        messageListRef.current?.replaceTemp(tempId, {
+                          id: result.id,
+                          channelId: result.channelId,
+                          userId: backendUserId || user.id,
+                          username: result.user?.username || user.username,
+                          avatar: result.user?.avatar,
+                          content: result.content,
+                          type: result.type || 'TEXT',
+                          createdAt: result.createdAt,
+                        });
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center text-center">
+                  <div className="mb-4 text-5xl">💬</div>
+                  <p className="mb-2 text-lg text-text-normal">选择一个频道开始聊天</p>
+                  <p className="text-sm text-text-muted">从左侧列表中选择频道</p>
+                </div>
+              )}
+            </div>
+
+            {/* 右侧成员列表（嵌入聊天区内，紧凑宽度） */}
+            {selectedChannel && !browsingPublicChannels && (
+              <ChannelMembers
+                channelId={selectedChannel.id}
+                userId={user.id}
+                isOwner={isOwner}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+
       <StatusBar />
 
-      {/* 频道设置模态框 */}
       {showSettings && selectedChannel && (
         <ChannelSettingsModal
           channel={selectedChannel}
           isOwner={isOwner}
           onClose={() => setShowSettings(false)}
           onDelete={handleDeleteChannel}
-          onUpdatePassword={handleUpdatePassword}
+          onUpdated={(updated) => {
+            setSelectedChannel(prev => prev ? { ...prev, ...updated } : prev);
+          }}
         />
       )}
 
-      {/* 数据库管理模态框 */}
-      {showDBManager && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-bg-secondary rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            {/* 标题栏 */}
-            <div className="flex items-center justify-between p-4 border-b border-border-color sticky top-0 bg-bg-secondary">
-              <h2 className="text-lg font-semibold text-text-normal">数据库管理</h2>
-              <button
-                onClick={() => setShowDBManager(false)}
-                className="text-text-muted hover:text-text-normal transition-colors"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* 内容 */}
-            <div className="p-4">
-              <DatabaseManager />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 错误提示 */}
       {error && (
         <div className="fixed top-4 right-4 z-50 rounded-lg bg-danger px-4 py-3 text-white shadow-lg">
           {error}
-          <button
-            onClick={() => setError(null)}
-            className="ml-4 text-white hover:text-gray-200"
-          >
-            ✕
-          </button>
+          <button onClick={() => setError(null)} className="ml-4 text-white hover:text-gray-200">✕</button>
         </div>
       )}
     </WebSocketProvider>
