@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket 测试</title>
+    <script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+</head>
+<body>
+    <h1>WebSocket 实时消息测试</h1>
+    <div>
+        <label>Channel ID: </label>
+        <input type="text" id="channelId" value="8a7403bb-bb82-4de6-b321-bbf4f4d1d609" style="width: 400px;">
+    </div>
+    <div>
+        <label>User ID: </label>
+        <input type="text" id="userId" value="test-user-web" style="width: 400px;">
+    </div>
+    <br>
+    <button onclick="joinChannel()">加入频道</button>
+    <button onclick="sendMessage()">发送消息</button>
+    <button onclick="leaveChannel()">离开频道</button>
+    <br><br>
+    <h2>日志:</h2>
+    <div id="logs" style="background: #f0f0f0; padding: 10px; height: 400px; overflow-y: scroll; font-family: monospace; font-size: 12px;"></div>
+
+    <script>
+        const logs = document.getElementById('logs');
+        let socket = null;
+
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `[${time}] ${msg}<br>`;
+            logs.scrollTop = logs.scrollHeight;
+            console.log(msg);
+        }
+
+        function connect() {
+            const userId = document.getElementById('userId').value;
+
+            log('========== 连接 WebSocket ==========');
+            log(`User ID: ${userId}`);
+
+            socket = io('http://localhost:3001', {
+                auth: { userId },
+                transports: ['websocket', 'polling'],
+            });
+
+            socket.on('connect', () => {
+                log(`✅ 已连接！Socket ID: ${socket.id}`);
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`❌ 断开连接: ${reason}`);
+            });
+
+            socket.on('connect_error', (err) => {
+                log(`❌ 连接错误: ${err}`);
+            });
+
+            // 监听所有事件
+            socket.onAny((eventName, ...args) => {
+                if (eventName.includes('message')) {
+                    log(`🔥 [收到事件] ${eventName}: ${JSON.stringify(args[0])}`);
+                }
+            });
+
+            // 特别监听消息
+            socket.on('message:new', (data) => {
+                log(`📨 ========== 收到新消息 ==========`);
+                log(`📨 完整数据: ${JSON.stringify(data)}`);
+                alert(`收到消息: ${data.content}`);
+            });
+        }
+
+        function joinChannel() {
+            if (!socket) connect();
+
+            const channelId = document.getElementById('channelId').value;
+            const userId = document.getElementById('userId').value;
+
+            log(`🏠 加入频道: ${channelId}`);
+            socket.emit('join:channel', { channelId, userId });
+        }
+
+        function leaveChannel() {
+            const channelId = document.getElementById('channelId').value;
+            const userId = document.getElementById('userId').value;
+
+            log(`🚪 离开频道: ${channelId}`);
+            socket.emit('leave:channel', { channelId, userId });
+        }
+
+        async function sendMessage() {
+            const channelId = document.getElementById('channelId').value;
+            const userId = document.getElementById('userId').value;
+            const content = prompt('输入消息内容:');
+
+            if (!content) return;
+
+            log(`📤 发送消息: ${content}`);
+
+            try {
+                const response = await fetch(`http://localhost:3001/channels/${channelId}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content,
+                        userId,
+                        username: 'TestUser',
+                    }),
+                });
+
+                const result = await response.json();
+                log(`✅ 消息已发送: ${JSON.stringify(result)}`);
+            } catch (err) {
+                log(`❌ 发送失败: ${err}`);
+            }
+        }
+
+        // 自动连接
+        setTimeout(connect, 500);
+        setTimeout(joinChannel, 2000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket 实时功能测试</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .status.connected {
+            background: #10b981;
+            color: white;
+        }
+        .status.disconnected {
+            background: #ef4444;
+            color: white;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .log {
+            background: #1f2937;
+            color: #10b981;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #10b981;
+            padding-left: 10px;
+        }
+        .log-entry.error {
+            border-left-color: #ef4444;
+            color: #ef4444;
+        }
+        .log-entry.info {
+            border-left-color: #3b82f6;
+            color: #60a5fa;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .success {
+            background: #10b981;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 10px;
+            text-align: center;
+            display: none;
+        }
+        .success.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 QuickChat 实时功能测试</h1>
+            <div>
+                <span class="status disconnected" id="wsStatus">⚫ 未连接</span>
+            </div>
+            <p style="margin-top: 10px; color: #666; font-size: 14px;">
+                打开多个标签页测试实时功能
+            </p>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2>📡 频道操作</h2>
+                <button onclick="createChannel()">创建测试频道</button>
+                <button onclick="getChannels()">刷新频道列表</button>
+                <div id="channelResult" class="success"></div>
+            </div>
+
+            <div class="card">
+                <h2>💬 消息测试</h2>
+                <input type="text" id="channelId" placeholder="频道ID" value="">
+                <input type="text" id="message" placeholder="消息内容" value="Hello from client!">
+                <button onclick="joinChannel()">加入频道</button>
+                <button onclick="sendMessage()">发送消息</button>
+                <div id="messageResult" class="success"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>📋 实时事件日志</h2>
+            <button onclick="clearLogs()">清空日志</button>
+            <div class="log" id="eventLog">
+                <div class="log-entry info">等待连接...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const WS_URL = 'ws://localhost:3001';
+        let socket = null;
+        let testChannelId = '';
+
+        function log(message, type = 'success') {
+            const logDiv = document.getElementById('eventLog');
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type === 'error' ? 'error' : type === 'info' ? 'info' : ''}`;
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.insertBefore(entry, logDiv.firstChild);
+
+            // 只保留最近50条日志
+            while (logDiv.children.length > 50) {
+                logDiv.removeChild(logDiv.lastChild);
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('eventLog').innerHTML = '';
+            log('日志已清空', 'info');
+        }
+
+        function connect() {
+            log('正在连接 WebSocket...', 'info');
+
+            socket = new WebSocket(WS_URL);
+
+            socket.onopen = () => {
+                log('✅ WebSocket 已连接', 'success');
+                document.getElementById('wsStatus').className = 'status connected';
+                document.getElementById('wsStatus').textContent = '🟢 已连接';
+            };
+
+            socket.onclose = () => {
+                log('❌ WebSocket 已断开', 'error');
+                document.getElementById('wsStatus').className = 'status disconnected';
+                document.getElementById('wsStatus').textContent = '⚫ 未连接';
+            };
+
+            socket.onerror = (error) => {
+                log('❌ WebSocket 错误: ' + error, 'error');
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`📨 收到事件: ${data.event}`, 'info');
+                    if (data.data) {
+                        log(`   数据: ${JSON.stringify(data.data).substring(0, 100)}...`);
+                    }
+                } catch (e) {
+                    log(`📨 收到消息: ${event.data}`);
+                }
+            };
+        }
+
+        function createChannel() {
+            const channelName = `测试频道_${Date.now().toString().slice(-6)}`;
+            log(`创建频道: ${channelName}`, 'info');
+
+            fetch('http://localhost:3001/channels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: channelName,
+                    type: 'PUBLIC',
+                    description: '实时测试频道'
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                testChannelId = data.id;
+                document.getElementById('channelId').value = data.id;
+                log(`✅ 频道创建成功: ${data.name} (ID: ${data.id.substring(0, 8)}...)`);
+                showResult('channelResult', `频道创建成功！ID: ${data.id.substring(0, 8)}...`);
+            })
+            .catch(error => {
+                log(`❌ 创建频道失败: ${error.message}`, 'error');
+            });
+        }
+
+        function getChannels() {
+            log('获取频道列表...', 'info');
+
+            fetch('http://localhost:3001/channels')
+            .then(res => res.json())
+            .then(data => {
+                log(`✅ 获取到 ${data.channels.length} 个频道`);
+                data.channels.forEach(ch => {
+                    log(`   - ${ch.name} (${ch.type}) [${ch.id.substring(0, 8)}...]`);
+                });
+            })
+            .catch(error => {
+                log(`❌ 获取频道失败: ${error.message}`, 'error');
+            });
+        }
+
+        function joinChannel() {
+            const channelId = document.getElementById('channelId').value;
+            if (!channelId) {
+                log('❌ 请输入频道ID', 'error');
+                return;
+            }
+
+            const userId = 'test_user_' + Date.now().toString().slice(-6);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    event: 'join:channel',
+                    data: { channelId, userId }
+                }));
+                log(`📤 发送加入频道事件: ${channelId.substring(0, 8)}...`, 'info');
+            }
+        }
+
+        function sendMessage() {
+            const channelId = document.getElementById('channelId').value;
+            const message = document.getElementById('message').value;
+
+            if (!channelId || !message) {
+                log('❌ 请输入频道ID和消息内容', 'error');
+                return;
+            }
+
+            const userId = 'test_user_' + Date.now().toString().slice(-6);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    event: 'message:send',
+                    data: { channelId, userId, content: message }
+                }));
+                log(`📤 发送消息: "${message}"`, 'info');
+            }
+        }
+
+        function showResult(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.classList.add('show');
+            setTimeout(() => element.classList.remove('show'), 3000);
+        }
+
+        // 页面加载时自动连接
+        window.onload = () => {
+            log('页面加载完成', 'info');
+            connect();
+        };
+
+        // 页面关闭时断开连接
+        window.onbeforeunload = () => {
+            if (socket) {
+                socket.close();
+            }
+        };
+    </script>
+</body>
+</html>

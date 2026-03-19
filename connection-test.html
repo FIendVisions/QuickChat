@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuickChat 连接测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .status-card {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .success {
+            border-left: 4px solid #10b981;
+        }
+        .error {
+            border-left: 4px solid #ef4444;
+        }
+        h1 { color: #333; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background: #2563eb; }
+        pre {
+            background: #1f2937;
+            color: #10b981;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 QuickChat 系统状态检查</h1>
+
+    <div class="status-card" id="frontendStatus">
+        <h2>前端服务器</h2>
+        <p>正在检查...</p>
+    </div>
+
+    <div class="status-card" id="backendStatus">
+        <h2>后端 API</h2>
+        <p>正在检查...</p>
+    </div>
+
+    <div class="status-card" id="websocketStatus">
+        <h2>WebSocket 连接</h2>
+        <p>正在检查...</p>
+    </div>
+
+    <div class="status-card">
+        <h2>操作</h2>
+        <button onclick="testFrontend()">测试前端</button>
+        <button onclick="testBackend()">测试后端</button>
+        <button onclick="testWebSocket()">测试WebSocket</button>
+        <button onclick="openApp()">打开应用</button>
+    </div>
+
+    <div class="status-card">
+        <h2>日志</h2>
+        <pre id="logs">等待操作...</pre>
+    </div>
+
+    <script>
+        function log(message) {
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            logs.textContent = `[${timestamp}] ${message}\n` + logs.textContent;
+        }
+
+        async function testFrontend() {
+            log('🔍 测试前端连接...');
+            try {
+                const response = await fetch('http://localhost:3000');
+                const text = await response.text();
+                if (text.includes('QuickChat')) {
+                    log('✅ 前端服务器正常');
+                    document.getElementById('frontendStatus').innerHTML =
+                        '<h2>前端服务器</h2><p class="success">✅ 运行正常</p>';
+                    document.getElementById('frontendStatus').className = 'status-card success';
+                } else {
+                    throw new Error('前端页面内容异常');
+                }
+            } catch (error) {
+                log('❌ 前端连接失败: ' + error.message);
+                document.getElementById('frontendStatus').innerHTML =
+                    '<h2>前端服务器</h2><p class="error">❌ 连接失败</p>';
+                document.getElementById('frontendStatus').className = 'status-card error';
+            }
+        }
+
+        async function testBackend() {
+            log('🔍 测试后端API...');
+            try {
+                const response = await fetch('http://localhost:3001/channels');
+                const data = await response.json();
+                log(`✅ 后端API正常，找到 ${data.channels.length} 个频道`);
+                document.getElementById('backendStatus').innerHTML =
+                    `<h2>后端 API</h2><p class="success">✅ 正常 (${data.channels.length} 个频道)</p>`;
+                document.getElementById('backendStatus').className = 'status-card success';
+            } catch (error) {
+                log('❌ 后端连接失败: ' + error.message);
+                document.getElementById('backendStatus').innerHTML =
+                    '<h2>后端 API</h2><p class="error">❌ 连接失败</p>';
+                document.getElementById('backendStatus').className = 'status-card error';
+            }
+        }
+
+        function testWebSocket() {
+            log('🔍 测试WebSocket连接...');
+            const ws = new WebSocket('ws://localhost:3001');
+
+            ws.onopen = () => {
+                log('✅ WebSocket连接成功');
+                document.getElementById('websocketStatus').innerHTML =
+                    '<h2>WebSocket 连接</h2><p class="success">✅ 连接成功</p>';
+                document.getElementById('websocketStatus').className = 'status-card success';
+                ws.close();
+            };
+
+            ws.onerror = (error) => {
+                log('❌ WebSocket连接失败');
+                document.getElementById('websocketStatus').innerHTML =
+                    '<h2>WebSocket 连接</h2><p class="error">❌ 连接失败</p>';
+                document.getElementById('websocketStatus').className = 'status-card error';
+            };
+
+            ws.onclose = () => {
+                log('📡 WebSocket连接已关闭');
+            };
+        }
+
+        function openApp() {
+            log('🚀 打开主应用...');
+            window.open('http://localhost:3000', '_blank');
+        }
+
+        // 页面加载时自动测试
+        window.onload = () => {
+            log('📋 开始系统检查...');
+            setTimeout(testFrontend, 500);
+            setTimeout(testBackend, 1500);
+            setTimeout(testWebSocket, 2500);
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>WebSocket 连接测试</title>
+    <script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #logs { background: #f5f5f5; padding: 10px; height: 300px; overflow-y: scroll; margin-top: 20px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket 实时消息测试</h1>
+
+    <div>
+        <button onclick="testConnection()">1. 测试连接</button>
+        <button onclick="joinChannel()">2. 加入频道</button>
+        <button onclick="sendMessage()">3. 发送消息</button>
+    </div>
+
+    <div id="logs"></div>
+
+    <script>
+        const logs = document.getElementById('logs');
+        let socket = null;
+        const channelId = '8a7403bb-bb82-4de6-b321-bbf4f4d1d609';
+        const userId = 'test-user-' + Date.now();
+
+        function log(msg, type = 'info') {
+            const time = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : '';
+            logs.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+            console.log(msg);
+        }
+
+        function testConnection() {
+            log('========== 开始连接测试 ==========');
+
+            socket = io('http://localhost:3001', {
+                auth: { userId },
+                transports: ['websocket', 'polling'],
+            });
+
+            socket.on('connect', () => {
+                log('✅ 连接成功! Socket ID: ' + socket.id, 'success');
+            });
+
+            socket.on('disconnect', (reason) => {
+                log('❌ 断开连接: ' + reason, 'error');
+            });
+
+            socket.on('connect_error', (err) => {
+                log('❌ 连接错误: ' + err, 'error');
+            });
+
+            // 监听所有事件
+            socket.onAny((eventName, ...args) => {
+                if (eventName.includes('message') || eventName.includes('channel')) {
+                    log(`📨 收到事件: ${eventName}`);
+                    if (eventName === 'message:new') {
+                        log(`🔥🔥🔥 收到消息内容: ${JSON.stringify(args[0])}`, 'success');
+                    }
+                }
+            });
+        }
+
+        function joinChannel() {
+            if (!socket) {
+                log('❌ 请先连接', 'error');
+                return;
+            }
+
+            log(`加入频道: ${channelId}`);
+            socket.emit('join:channel', { channelId, userId });
+        }
+
+        async function sendMessage() {
+            const content = prompt('输入消息内容:');
+            if (!content) return;
+
+            log(`发送消息: ${content}`);
+
+            try {
+                const response = await fetch(`http://localhost:3001/channels/${channelId}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content, userId, username: 'TestUser' }),
+                });
+
+                const result = await response.json();
+                log('✅ 消息已发送: ' + result.content, 'success');
+            } catch (err) {
+                log('❌ 发送失败: ' + err, 'error');
+            }
+        }
+
+        // 自动开始
+        log('页面加载完成，等待操作...');
+    </script>
+</body>
+</html>

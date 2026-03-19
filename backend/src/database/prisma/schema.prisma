@@ -1,0 +1,101 @@
+// backend/src/database/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// 用户表
+// ============================================================
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String?  @unique
+  password  String?
+  avatar    String?
+  role      String   @default("USER")
+  status    String   @default("OFFLINE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownedChannels       Channel[]       @relation("ChannelOwner")
+  channelMemberships  ChannelMember[]
+  messages            Message[]
+
+  @@map("users")
+  @@index([status])
+}
+
+// ============================================================
+// 频道表
+// ============================================================
+
+model Channel {
+  id              String        @id @default(uuid())
+  name            String
+  type            String
+  ownerId         String
+  description     String?
+  maxParticipants Int?
+  password        String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  owner    User            @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members  ChannelMember[]
+  messages Message[]
+
+  @@index([type])
+  @@index([ownerId])
+  @@map("channels")
+}
+
+// ============================================================
+// 频道成员表
+// ============================================================
+
+model ChannelMember {
+  id          String   @id @default(uuid())
+  channelId   String
+  userId      String
+  joinedAt    DateTime @default(now())
+  lastReadAt  DateTime?
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, userId])
+  @@index([channelId])
+  @@index([userId])
+  @@map("channel_members")
+}
+
+// ============================================================
+// 消息表
+// ============================================================
+
+model Message {
+  id        String   @id @default(uuid())
+  channelId String
+  userId    String
+  type      String   @default("TEXT")
+  content   String
+  sequence  Int      @default(0) // 消息序列号，用于排序和增量同步
+  status    String   @default("SENT") // 消息状态：SENT, DELIVERED, FAILED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, sequence]) // 按序列号索引
+  @@index([channelId, createdAt(sort: Desc)])
+  @@index([userId])
+  @@map("messages")
+}

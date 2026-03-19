@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 连接测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-card {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .success { border-left: 4px solid #10b981; }
+        .error { border-left: 4px solid #ef4444; }
+        .pending { border-left: 4px solid #f59e0b; }
+        h2 { margin-top: 0; }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        pre {
+            background: #1f2937;
+            color: #10b981;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 8px;
+            background: #f9fafb;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-info { color: #3b82f6; }
+        .log-error { color: #ef4444; }
+        .log-success { color: #10b981; }
+    </style>
+</head>
+<body>
+    <h1>🔍 QuickChat API 连接测试</h1>
+    <p>测试前端是否能正确连接到后端 API</p>
+
+    <div class="test-card">
+        <h2>测试 1: 获取频道列表</h2>
+        <button onclick="testGetChannels()">测试获取频道</button>
+        <div id="result1"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>测试 2: 创建新频道</h2>
+        <input type="text" id="channelName" placeholder="频道名称" value="测试频道" style="padding: 8px; margin: 5px;">
+        <button onclick="testCreateChannel()">创建频道</button>
+        <div id="result2"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>测试 3: 查看日志</h2>
+        <button onclick="clearLogs()">清空日志</button>
+        <div id="logs"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3001';
+        const logs = [];
+
+        function addLog(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${message}`;
+            logs.push({ message: logEntry, type });
+
+            const logsDiv = document.getElementById('logs');
+            const className = `log-${type}`;
+            logsDiv.innerHTML = `<div class="log-entry ${className}">${logEntry}</div>` + logsDiv.innerHTML;
+        }
+
+        function clearLogs() {
+            logs.length = 0;
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        async function testGetChannels() {
+            const resultDiv = document.getElementById('result1');
+            resultDiv.innerHTML = '<p>⏳ 正在测试...</p>';
+            addLog('开始测试: 获取频道列表', 'info');
+
+            try {
+                addLog(`发送请求到: ${API_URL}/channels`, 'info');
+                const response = await fetch(`${API_URL}/channels`);
+                addLog(`响应状态: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                addLog(`成功获取 ${data.channels.length} 个频道`, 'success');
+
+                resultDiv.innerHTML = `
+                    <p class="success">✅ 成功！获取到 ${data.channels.length} 个频道</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                addLog(`错误: ${error.message}`, 'error');
+                resultDiv.innerHTML = `
+                    <p class="error">❌ 失败: ${error.message}</p>
+                `;
+            }
+        }
+
+        async function testCreateChannel() {
+            const resultDiv = document.getElementById('result2');
+            const channelName = document.getElementById('channelName').value || '测试频道';
+
+            resultDiv.innerHTML = '<p>⏳ 正在创建...</p>';
+            addLog(`开始测试: 创建频道 "${channelName}"`, 'info');
+
+            try {
+                const channelData = {
+                    name: channelName,
+                    type: 'PUBLIC',
+                    description: '通过测试页面创建'
+                };
+
+                addLog(`发送请求到: ${API_URL}/channels`, 'info');
+                addLog(`请求数据: ${JSON.stringify(channelData)}`, 'info');
+
+                const response = await fetch(`${API_URL}/channels`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(channelData)
+                });
+
+                addLog(`响应状态: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    addLog(`错误响应: ${errorText}`, 'error');
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
+                const data = await response.json();
+                addLog(`成功创建频道: ${data.name}`, 'success');
+                addLog(`频道ID: ${data.id}`, 'success');
+
+                resultDiv.innerHTML = `
+                    <p class="success">✅ 成功！频道已创建</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                addLog(`错误: ${error.message}`, 'error');
+                resultDiv.innerHTML = `
+                    <p class="error">❌ 失败: ${error.message}</p>
+                `;
+            }
+        }
+
+        // 页面加载时自动测试
+        window.onload = function() {
+            addLog('页面加载完成，开始自动测试', 'info');
+            setTimeout(testGetChannels, 500);
+        };
+    </script>
+</body>
+</html>

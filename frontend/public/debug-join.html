@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>频道加入测试</title>
+    <script src="https://cdn.socket.io/4.8.0/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .log {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 频道加入和消息接收测试</h1>
+
+    <div>
+        <button onclick="connectUser1()">连接用户1</button>
+        <button onclick="connectUser2()">连接用户2</button>
+        <button onclick="user1SendMessage()">用户1发送消息</button>
+        <button onclick="clearLogs()">清空日志</button>
+    </div>
+
+    <div class="log" id="logs"></div>
+
+    <script>
+        const CHANNEL_ID = '8a7403bb-bb82-4de6-b321-bbf4f4d1d609';
+        let user1Socket = null;
+        let user2Socket = null;
+
+        function log(msg, type = 'info') {
+            const logs = document.getElementById('logs');
+            const time = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : 'info';
+            logs.innerHTML += `<div class="${className}">[${time}] ${msg}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function connectUser1() {
+            if (user1Socket) {
+                log('❌ 用户1 已连接', 'error');
+                return;
+            }
+
+            log('🔌 连接用户1...');
+            const userId = 'test-user-1-' + Date.now();
+
+            user1Socket = io('http://localhost:3001', {
+                auth: { userId },
+                transports: ['websocket', 'polling'],
+            });
+
+            user1Socket.on('connect', () => {
+                log(`✅ 用户1 已连接 (Socket ID: ${user1Socket.id}, User ID: ${userId})`, 'success');
+
+                // 加入频道
+                log(`🏠 用户1 加入频道 ${CHANNEL_ID}...`);
+                user1Socket.emit('join:channel', {
+                    channelId: CHANNEL_ID,
+                    userId,
+                });
+            });
+
+            user1Socket.on('connect_error', (err) => {
+                log(`❌ 用户1 连接失败: ${err}`, 'error');
+            });
+
+            user1Socket.on('member:joined', (data) => {
+                log(`👋 [用户1] 成员加入事件: ${data.userId}`, 'info');
+            });
+
+            user1Socket.on('message:new', (data) => {
+                log(`📨 [用户1] 收到消息: "${data.content}" 来自 ${data.username}`, 'success');
+            });
+
+            user1Socket.onAny((eventName, ...args) => {
+                if (eventName.includes('channel') || eventName.includes('member') || eventName.includes('message')) {
+                    log(`🔍 [用户1] 事件: ${eventName}`, 'info');
+                }
+            });
+        }
+
+        function connectUser2() {
+            if (user2Socket) {
+                log('❌ 用户2 已连接', 'error');
+                return;
+            }
+
+            log('🔌 连接用户2...');
+            const userId = 'test-user-2-' + Date.now();
+
+            user2Socket = io('http://localhost:3001', {
+                auth: { userId },
+                transports: ['websocket', 'polling'],
+            });
+
+            user2Socket.on('connect', () => {
+                log(`✅ 用户2 已连接 (Socket ID: ${user2Socket.id}, User ID: ${userId})`, 'success');
+
+                // 加入频道
+                log(`🏠 用户2 加入频道 ${CHANNEL_ID}...`);
+                user2Socket.emit('join:channel', {
+                    channelId: CHANNEL_ID,
+                    userId,
+                });
+            });
+
+            user2Socket.on('connect_error', (err) => {
+                log(`❌ 用户2 连接失败: ${err}`, 'error');
+            });
+
+            user2Socket.on('member:joined', (data) => {
+                log(`👋 [用户2] 成员加入事件: ${data.userId}`, 'info');
+            });
+
+            user2Socket.on('message:new', (data) => {
+                log(`📨📨📨 [用户2] 收到消息: "${data.content}" 来自 ${data.username}`, 'success');
+            });
+
+            user2Socket.onAny((eventName, ...args) => {
+                if (eventName.includes('channel') || eventName.includes('member') || eventName.includes('message')) {
+                    log(`🔍 [用户2] 事件: ${eventName}`, 'info');
+                }
+            });
+        }
+
+        async function user1SendMessage() {
+            if (!user1Socket || !user1Socket.connected) {
+                log('❌ 用户1 未连接', 'error');
+                return;
+            }
+
+            log('📤 用户1 发送消息...');
+
+            try {
+                const response = await fetch(`http://localhost:3001/channels/${CHANNEL_ID}/messages`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        content: '来自用户1的测试消息',
+                        userId: 'test-user-1',
+                        username: 'TestUser1',
+                    }),
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    log(`✅ 消息已发送 (ID: ${result.id})`, 'success');
+                } else {
+                    log(`❌ 发送失败: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ 发送错误: ${error}`, 'error');
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('logs').innerHTML = '';
+        }
+
+        log('📝 测试页面已加载');
+        log('📝 点击按钮开始测试');
+    </script>
+</body>
+</html>
