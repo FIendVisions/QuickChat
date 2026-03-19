@@ -227,50 +227,53 @@ function MessageItem({ message, currentUserId }: MessageItemProps) {
   const isCurrentUser = message.userId === currentUserId;
 
   return (
-    <div className={`flex gap-3 ${isCurrentUser ? 'flex-row-reverse' : ''}`}>
+    <div className={`flex gap-2.5 ${isCurrentUser ? 'flex-row-reverse' : ''}`}>
       {/* 头像 */}
-      <div className="flex-shrink-0">
+      <div className="flex-shrink-0 self-end">
         {message.avatar ? (
           <img
             src={message.avatar}
             alt={message.username}
-            className="w-10 h-10 rounded-full"
+            className="w-9 h-9 rounded-full"
           />
         ) : (
-          <div className="w-10 h-10 rounded-full bg-bg-tertiary flex items-center justify-center text-lg">
-            👤
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm ${
+            isCurrentUser
+              ? 'bg-primary/20 text-primary'
+              : 'bg-bg-tertiary text-text-muted'
+          }`}>
+            {(message.username || '?').charAt(0).toUpperCase()}
           </div>
         )}
       </div>
 
       {/* 消息内容 */}
-      <div className={`flex-1 min-w-0 ${isCurrentUser ? 'text-right' : ''}`}>
+      <div className={`max-w-[70%] min-w-0 ${isCurrentUser ? 'items-end' : 'items-start'} flex flex-col`}>
         {/* 用户名和时间 */}
-        <div className={`flex items-baseline gap-2 mb-0.5 ${isCurrentUser ? 'flex-row-reverse' : ''}`}>
-          <span className={`font-medium text-text-normal hover:underline cursor-pointer ${isCurrentUser ? 'text-primary' : ''}`}>
-            {message.username}
-            {isCurrentUser && ' (我)'}
+        <div className={`flex items-baseline gap-2 mb-1 ${isCurrentUser ? 'flex-row-reverse' : ''}`}>
+          <span className={`text-xs font-medium ${isCurrentUser ? 'text-success' : 'text-text-muted'}`}>
+            {isCurrentUser ? '我' : message.username}
           </span>
-          <span className="text-xs text-text-muted">
+          <span className="text-[10px] text-text-muted/60">
             {formatDistanceToNow(new Date(message.createdAt), {
               addSuffix: true,
               locale: zhCN,
             })}
           </span>
           {message.seq > 0 && (
-            <span className="text-xs text-text-muted">
+            <span className="text-[10px] text-text-muted/40">
               #{message.seq}
             </span>
           )}
         </div>
 
-        {/* 消息文本 */}
-        <div className={`inline-block max-w-[70%] rounded-lg px-3 py-2 ${
+        {/* 消息气泡 */}
+        <div className={`rounded-2xl px-3.5 py-2 shadow-sm ${
           isCurrentUser
-            ? 'bg-primary text-white'
-            : 'bg-bg-tertiary text-text-normal'
+            ? 'bg-success text-white rounded-br-sm'
+            : 'bg-bg-tertiary text-text-normal rounded-bl-sm'
         }`}>
-          <p className="break-words">{message.content}</p>
+          <p className="break-words text-sm leading-relaxed">{message.content}</p>
         </div>
       </div>
     </div>

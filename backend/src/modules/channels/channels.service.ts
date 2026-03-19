@@ -549,29 +549,32 @@ export class ChannelsService {
       throw new NotFoundException('Channel not found');
     }
 
-    // 验证用户是否在频道中
-    let isMember = await this.isUserInChannel(channelId, dto.userId);
+    // 确保用户在数据库中存在
+    let dbUser = await this.prisma.user.findUnique({ where: { id: dto.userId } });
+    if (!dbUser) {
+      // 按用户名查找（可能用户已存在但 ID 不同）
+      dbUser = await this.prisma.user.findUnique({ where: { username: dto.username } });
+      if (dbUser) {
+        dto.userId = dbUser.id;
+      } else {
+        // 自动创建用户
+        this.logger.log(`User ${dto.userId} (${dto.username}) not found in DB, creating...`);
+        dbUser = await this.prisma.user.create({
+          data: {
+            id: dto.userId,
+            username: dto.username,
+            status: 'ONLINE',
+          },
+        });
+      }
+    }
 
-    // 如果用户不在频道中，自动加入
+    // 验证用户是否在频道中，如果不在则自动加入
+    const isMember = await this.isUserInChannel(channelId, dto.userId);
     if (!isMember) {
       this.logger.log(`User ${dto.userId} not in channel ${channelId}, auto-joining...`);
+      await this.addMember(channelId, dto.userId);
 
-      try {
-        await this.addMember(channelId, dto.userId);
-      } catch (error) {
-        // 如果用户不存在（外键约束），使用默认admin用户
-        this.logger.warn(`User ${dto.userId} does not exist, using default admin user`);
-        dto.userId = '5b3b3e13-e544-40a9-ae37-ce7045d598af'; // admin用户ID
-        dto.username = 'admin';
-
-        // 再次尝试添加成员
-        const checkAgain = await this.isUserInChannel(channelId, dto.userId);
-        if (!checkAgain) {
-          await this.addMember(channelId, dto.userId);
-        }
-      }
-
-      // 广播成员加入事件
       this.websocketGateway.sendToChannel(channelId, 'member:joined', {
         channelId: channel.id,
         channelName: channel.name,

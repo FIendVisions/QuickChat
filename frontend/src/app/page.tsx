@@ -327,10 +327,17 @@ export default function HomePage() {
 
                     const result = await response.json();
 
+                    // 如果后端返回的 userId 与前端不一致，同步为后端的 userId
+                    const backendUserId = result.userId;
+                    if (backendUserId && backendUserId !== user.id) {
+                      localStorage.setItem('userId', backendUserId);
+                      setUser(prev => prev ? { ...prev, id: backendUserId } : prev);
+                    }
+
                     messageListRef.current?.replaceTemp(tempId, {
                       id: result.id,
                       channelId: result.channelId,
-                      userId: result.userId,
+                      userId: backendUserId || user.id,
                       username: result.user?.username || user.username,
                       avatar: result.user?.avatar,
                       content: result.content,
