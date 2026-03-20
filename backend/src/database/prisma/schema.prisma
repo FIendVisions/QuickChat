@@ -27,6 +27,7 @@ model User {
   ownedChannels       Channel[]       @relation("ChannelOwner")
   channelMemberships  ChannelMember[]
   messages            Message[]
+  channelPinsCreated  ChannelPin[]    @relation("ChannelPinAuthor")
 
   @@map("users")
   @@index([status])
@@ -50,6 +51,7 @@ model Channel {
   owner    User            @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members  ChannelMember[]
   messages Message[]
+  pins     ChannelPin[]
 
   @@index([type])
   @@index([ownerId])
@@ -100,10 +102,31 @@ model Message {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   replyTo Message?  @relation("MessageThread", fields: [replyToId], references: [id], onDelete: SetNull)
   replies Message[] @relation("MessageThread")
+  pins    ChannelPin[]
 
   @@index([channelId, sequence]) // 按序列号索引
   @@index([channelId, createdAt(sort: Desc)])
   @@index([userId])
   @@index([replyToId])
   @@map("messages")
+}
+
+// ============================================================
+// 频道全员置顶（所有成员可见，任意成员可取消）
+// ============================================================
+
+model ChannelPin {
+  id             String   @id @default(uuid())
+  channelId      String
+  messageId      String
+  pinnedByUserId String
+  createdAt      DateTime @default(now())
+
+  channel  Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedBy User    @relation("ChannelPinAuthor", fields: [pinnedByUserId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, messageId])
+  @@index([channelId])
+  @@map("channel_pins")
 }

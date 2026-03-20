@@ -16,8 +16,9 @@ import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
 import { resolveUploadUrl } from '@/lib/mediaUrl';
 import { mapChannelMessage, messageToReplyRef } from '@/lib/mapChannelMessage';
-import { loadChannelPins, toggleChannelPin } from '@/lib/pinnedMessages';
+import { loadPersonalPins, togglePersonalPin } from '@/lib/pinnedMessages';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
+import type { EveryonePin } from '@/types/pin.types';
 
 export default function HomePage() {
   const [user, setUser] = useState<{ id: string; username: string; email?: string } | null>(null);
@@ -32,7 +33,8 @@ export default function HomePage() {
   const chatDragDepth = useRef(0);
   const [chatDragOver, setChatDragOver] = useState(false);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
-  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
+  const [personalPinIds, setPersonalPinIds] = useState<string[]>([]);
+  const [everyonePins, setEveryonePins] = useState<EveryonePin[]>([]);
 
   const isOfficialChannel = selectedChannel?.id === 'public-official';
   const isOwner = selectedChannel?.ownerId === user?.id;
@@ -105,24 +107,68 @@ export default function HomePage() {
     [sendChannelPayload],
   );
 
-  useEffect(() => {
-    if (selectedChannel?.id) {
-      setPinnedIds(loadChannelPins(selectedChannel.id));
-    } else {
-      setPinnedIds([]);
+  const refreshEveryonePins = useCallback(async () => {
+    if (!selectedChannel?.id) return;
+    try {
+      const { pins } = await channelApi.getPins(selectedChannel.id);
+      setEveryonePins(Array.isArray(pins) ? pins : []);
+    } catch {
+      setEveryonePins([]);
     }
   }, [selectedChannel?.id]);
+
+  useEffect(() => {
+    if (selectedChannel?.id && user?.id) {
+      setPersonalPinIds(loadPersonalPins(user.id, selectedChannel.id));
+      void refreshEveryonePins();
+    } else {
+      setPersonalPinIds([]);
+      setEveryonePins([]);
+    }
+  }, [selectedChannel?.id, user?.id, refreshEveryonePins]);
 
   useEffect(() => {
     setReplyTo(null);
   }, [selectedChannel?.id]);
 
-  const handleTogglePin = useCallback(
+  const handleTogglePersonalPin = useCallback(
     (messageId: string) => {
-      if (!selectedChannel) return;
-      setPinnedIds(toggleChannelPin(selectedChannel.id, messageId));
+      if (!selectedChannel || !user) return;
+      setPersonalPinIds(togglePersonalPin(user.id, selectedChannel.id, messageId));
     },
-    [selectedChannel],
+    [selectedChannel, user],
+  );
+
+  const handleToggleEveryonePin = useCallback(
+    async (messageId: string) => {
+      if (!selectedChannel || !user) return;
+      try {
+        const exists = everyonePins.some((p) => p.messageId === messageId);
+        if (exists) {
+          const { pins } = await channelApi.removeEveryonePin(selectedChannel.id, messageId, user.id);
+          setEveryonePins(pins);
+        } else {
+          const { pins } = await channelApi.addEveryonePin(selectedChannel.id, messageId, user.id);
+          setEveryonePins(pins);
+        }
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : '全员置顶操作失败');
+      }
+    },
+    [selectedChannel, user, everyonePins],
+  );
+
+  const handleUnpinEveryone = useCallback(
+    async (messageId: string) => {
+      if (!selectedChannel || !user) return;
+      try {
+        const { pins } = await channelApi.removeEveryonePin(selectedChannel.id, messageId, user.id);
+        setEveryonePins(pins);
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : '取消全员置顶失败');
+      }
+    },
+    [selectedChannel, user],
   );
 
   useEffect(() => {
@@ -415,8 +461,12 @@ export default function HomePage() {
                           channelId={selectedChannel.id}
                           userId={user.id}
                           onReply={setReplyTo}
-                          pinnedIds={pinnedIds}
-                          onTogglePin={handleTogglePin}
+                          personalPinIds={personalPinIds}
+                          everyonePins={everyonePins}
+                          onTogglePersonalPin={handleTogglePersonalPin}
+                          onToggleEveryonePin={handleToggleEveryonePin}
+                          onUnpinEveryone={handleUnpinEveryone}
+                          onEveryonePinsRefresh={refreshEveryonePins}
                         />
                       </div>
                       <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">

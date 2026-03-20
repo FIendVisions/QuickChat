@@ -159,4 +159,47 @@ export const channelApi = {
     }
     return response.json();
   },
+
+  /** 全员置顶列表 */
+  async getPins(channelId: string): Promise<{
+    pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
+  }> {
+    const response = await fetch(`${API_URL}/channels/${channelId}/pins`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      return { pins: [] };
+    }
+    return handleResponse(response);
+  },
+
+  async addEveryonePin(
+    channelId: string,
+    messageId: string,
+    userId: string,
+  ): Promise<{
+    pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
+  }> {
+    const response = await fetch(`${API_URL}/channels/${channelId}/pins`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ messageId, userId }),
+    });
+    return handleResponse(response);
+  },
+
+  async removeEveryonePin(
+    channelId: string,
+    messageId: string,
+    userId: string,
+  ): Promise<{
+    pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
+  }> {
+    const response = await fetch(`${API_URL}/channels/${channelId}/pins/remove`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ messageId, userId }),
+    });
+    return handleResponse(response);
+  },
 };

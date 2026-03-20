@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Reply, Copy, Pin, PinOff } from 'lucide-react';
+import { Reply, Copy, Pin, PinOff, Users } from 'lucide-react';
 
 interface MessageContextMenuProps {
   x: number;
@@ -9,8 +9,10 @@ interface MessageContextMenuProps {
   onClose: () => void;
   onReply: () => void;
   onCopy: () => void;
-  onPin: () => void;
-  isPinned: boolean;
+  onTogglePersonalPin: () => void;
+  onToggleEveryonePin: () => void | Promise<void>;
+  isPersonalPinned: boolean;
+  isEveryonePinned: boolean;
   /** 临时消息等不可置顶时传 false，隐藏置顶项 */
   canPin?: boolean;
   /** 临时消息等不可回复时传 false，隐藏回复项 */
@@ -23,8 +25,10 @@ export function MessageContextMenu({
   onClose,
   onReply,
   onCopy,
-  onPin,
-  isPinned,
+  onTogglePersonalPin,
+  onToggleEveryonePin,
+  isPersonalPinned,
+  isEveryonePinned,
   canPin = true,
   canReply = true,
 }: MessageContextMenuProps) {
@@ -63,7 +67,7 @@ export function MessageContextMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[100] min-w-[160px] rounded-lg border border-border-color bg-bg-secondary py-1 shadow-xl"
+      className="fixed z-[100] min-w-[200px] rounded-lg border border-border-color bg-bg-secondary py-1 shadow-xl"
       style={{ left: x, top: y }}
       role="menu"
     >
@@ -78,10 +82,38 @@ export function MessageContextMenu({
         拷贝文本
       </button>
       {canPin && (
-        <button type="button" className={item} onClick={() => { onPin(); onClose(); }}>
-          {isPinned ? <PinOff size={16} className="text-warning" /> : <Pin size={16} className="text-primary" />}
-          {isPinned ? '取消置顶' : '置顶'}
-        </button>
+        <>
+          <button
+            type="button"
+            className={item}
+            onClick={() => {
+              onTogglePersonalPin();
+              onClose();
+            }}
+          >
+            {isPersonalPinned ? (
+              <PinOff size={16} className="text-warning" />
+            ) : (
+              <Pin size={16} className="text-text-muted" />
+            )}
+            {isPersonalPinned ? '取消个人置顶' : '个人置顶'}
+          </button>
+          <button
+            type="button"
+            className={item}
+            onClick={async () => {
+              await onToggleEveryonePin();
+              onClose();
+            }}
+          >
+            {isEveryonePinned ? (
+              <PinOff size={16} className="text-warning" />
+            ) : (
+              <Users size={16} className="text-primary" />
+            )}
+            {isEveryonePinned ? '取消全员置顶' : '全员置顶'}
+          </button>
+        </>
       )}
     </div>
   );

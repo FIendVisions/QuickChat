@@ -10,6 +10,7 @@ import { useWebSocket } from '@/contexts/WebSocketContext';
 import { mapChannelMessage } from '@/lib/mapChannelMessage';
 import { messageToPlainText, replyRefSnippetPlain } from '@/lib/messagePlainText';
 import type { ChatMessage } from '@/types/message.types';
+import type { EveryonePin } from '@/types/pin.types';
 import { MessageContextMenu } from './MessageContextMenu';
 import { PinnedMessagesBar } from './PinnedMessagesBar';
 
@@ -21,10 +22,15 @@ interface MessageListProps {
   onMessagesChange?: (messages: Message[]) => void;
   /** 右键选择「回复」 */
   onReply?: (message: Message) => void;
-  /** 当前频道置顶的消息 id（顺序：新置顶在前） */
-  pinnedIds?: string[];
-  /** 置顶 / 取消置顶 */
-  onTogglePin?: (messageId: string) => void;
+  /** 个人置顶（仅当前用户，本地） */
+  personalPinIds?: string[];
+  /** 全员置顶（服务端同步） */
+  everyonePins?: EveryonePin[];
+  onTogglePersonalPin?: (messageId: string) => void;
+  onToggleEveryonePin?: (messageId: string) => void | Promise<void>;
+  onUnpinEveryone?: (messageId: string) => void | Promise<void>;
+  /** WebSocket 全员置顶变更时由父组件刷新列表 */
+  onEveryonePinsRefresh?: () => void;
 }
 
 export interface MessageListRef {
@@ -40,7 +46,21 @@ export interface MessageListRef {
  * 从后端API加载历史消息 + 直接在 socket 上监听实时新消息
  */
 export const MessageList = forwardRef<MessageListRef, MessageListProps>(
-  ({ channelId, userId, onMessagesChange, onReply, pinnedIds = [], onTogglePin }, ref) => {
+  (
+    {
+      channelId,
+      userId,
+      onMessagesChange,
+      onReply,
+      personalPinIds = [],
+      everyonePins = [],
+      onTogglePersonalPin,
+      onToggleEveryonePin,
+      onUnpinEveryone,
+      onEveryonePinsRefresh,
+    },
+    ref,
+  ) => {
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const isLoadingRef = useRef(false);
@@ -141,11 +161,22 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
 
       socket.on('message:new', handleMessageNew);
 
+      const onPinAdded = (data: { channelId?: string }) => {
+        if (data.channelId === channelId) onEveryonePinsRefresh?.();
+      };
+      const onPinRemoved = (data: { channelId?: string }) => {
+        if (data.channelId === channelId) onEveryonePinsRefresh?.();
+      };
+      socket.on('channel:pin:added', onPinAdded);
+      socket.on('channel:pin:removed', onPinRemoved);
+
       return () => {
         socket.emit('leave:channel', { channelId, userId });
         socket.off('message:new', handleMessageNew);
+        socket.off('channel:pin:added', onPinAdded);
+        socket.off('channel:pin:removed', onPinRemoved);
       };
-    }, [socket, connected, channelId, userId]);
+    }, [socket, connected, channelId, userId, onEveryonePinsRefresh]);
 
     /* 初次加载完成后滚到底部 */
     useEffect(() => {
@@ -199,21 +230,25 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
             onClose={() => setMenu(null)}
             onReply={() => onReply?.(menu.message)}
             onCopy={() => handleCopy(menu.message)}
-            onPin={() => onTogglePin?.(menu.message.id)}
-            isPinned={pinnedIds.includes(menu.message.id)}
+            onTogglePersonalPin={() => onTogglePersonalPin?.(menu.message.id)}
+            onToggleEveryonePin={() => onToggleEveryonePin?.(menu.message.id) ?? Promise.resolve()}
+            isPersonalPinned={personalPinIds.includes(menu.message.id)}
+            isEveryonePinned={everyonePins.some((p) => p.messageId === menu.message.id)}
             canPin={!menu.message.id.startsWith('temp-')}
             canReply={!menu.message.id.startsWith('temp-')}
           />
         )}
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {pinnedIds.length > 0 && (
+          {(everyonePins.length > 0 || personalPinIds.length > 0) && (
             <div className="shrink-0 border-b border-border-color bg-bg-primary px-4 py-2">
               <PinnedMessagesBar
-                pinnedIds={pinnedIds}
+                everyonePins={everyonePins}
+                personalPinIds={personalPinIds}
                 messages={messages}
                 onJump={(id) => scrollToMessage(id)}
-                onUnpin={(id) => onTogglePin?.(id)}
+                onUnpinEveryone={(id) => void onUnpinEveryone?.(id)}
+                onUnpinPersonal={(id) => onTogglePersonalPin?.(id)}
               />
             </div>
           )}

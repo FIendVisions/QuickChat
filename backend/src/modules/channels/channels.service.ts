@@ -29,6 +29,7 @@ import { ChannelDetail, ChannelListItem, ChannelMemberInfo, JoinChannelResponse 
 @Injectable()
 export class ChannelsService {
   private readonly logger = new Logger(ChannelsService.name);
+  private static readonly MAX_CHANNEL_PINS = 20;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -632,6 +633,115 @@ export class ChannelsService {
     this.logger.log(`📡 [BROADCAST] Message ${message.id} (seq: ${sequence}) sent to ${recipientCount} recipient(s)`);
 
     return payload;
+  }
+
+  /**
+   * 全员置顶列表（频道内同步，任意成员可取消）
+   */
+  async getChannelPins(channelId: string): Promise<
+    { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[]
+  > {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) {
+      throw new NotFoundException('Channel not found');
+    }
+
+    const pins = await this.prisma.channelPin.findMany({
+      where: { channelId },
+      orderBy: { createdAt: 'desc' },
+      take: ChannelsService.MAX_CHANNEL_PINS,
+      include: {
+        pinnedBy: { select: { username: true } },
+      },
+    });
+
+    return pins.map((p) => ({
+      messageId: p.messageId,
+      pinnedByUserId: p.pinnedByUserId,
+      pinnedByUsername: p.pinnedBy.username,
+      createdAt: this.toIso(p.createdAt),
+    }));
+  }
+
+  async addChannelPin(channelId: string, userId: string, messageId: string): Promise<
+    { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[]
+  > {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) {
+      throw new NotFoundException('Channel not found');
+    }
+
+    const isMember = await this.isUserInChannel(channelId, userId);
+    if (!isMember) {
+      throw new ForbiddenException('只有频道成员可以全员置顶');
+    }
+
+    const msg = await this.prisma.message.findFirst({
+      where: { id: messageId, channelId },
+    });
+    if (!msg) {
+      throw new BadRequestException('消息不存在或不在当前频道');
+    }
+
+    await this.ensureUserExists(userId);
+
+    const existing = await this.prisma.channelPin.findUnique({
+      where: { channelId_messageId: { channelId, messageId } },
+    });
+    if (existing) {
+      return this.getChannelPins(channelId);
+    }
+
+    const count = await this.prisma.channelPin.count({ where: { channelId } });
+    if (count >= ChannelsService.MAX_CHANNEL_PINS) {
+      throw new BadRequestException(`全员置顶最多 ${ChannelsService.MAX_CHANNEL_PINS} 条`);
+    }
+
+    const pin = await this.prisma.channelPin.create({
+      data: {
+        channelId,
+        messageId,
+        pinnedByUserId: userId,
+      },
+      include: {
+        pinnedBy: { select: { username: true } },
+      },
+    });
+
+    this.websocketGateway.sendToChannel(channelId, 'channel:pin:added', {
+      channelId,
+      messageId: pin.messageId,
+      pinnedByUserId: pin.pinnedByUserId,
+      pinnedByUsername: pin.pinnedBy.username,
+      createdAt: this.toIso(pin.createdAt),
+    });
+
+    return this.getChannelPins(channelId);
+  }
+
+  async removeChannelPin(channelId: string, userId: string, messageId: string): Promise<
+    { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[]
+  > {
+    const channel = await this.prisma.channel.findUnique({ where: { id: channelId } });
+    if (!channel) {
+      throw new NotFoundException('Channel not found');
+    }
+
+    const isMember = await this.isUserInChannel(channelId, userId);
+    if (!isMember) {
+      throw new ForbiddenException('只有频道成员可以取消全员置顶');
+    }
+
+    await this.prisma.channelPin.deleteMany({
+      where: { channelId, messageId },
+    });
+
+    this.websocketGateway.sendToChannel(channelId, 'channel:pin:removed', {
+      channelId,
+      messageId,
+    });
+
+    return this.getChannelPins(channelId);
   }
 
   private toIso(createdAt: Date | string): string {

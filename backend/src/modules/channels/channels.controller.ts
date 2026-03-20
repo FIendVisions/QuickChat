@@ -5,7 +5,6 @@ import {
   Get,
   Post,
   Patch,
-  Delete,
   Body,
   Param,
   Query,
@@ -32,6 +31,7 @@ import { UpdateChannelDto } from './dto/update-channel.dto';
 import { JoinChannelDto } from './dto/join-channel.dto';
 import { QueryChannelDto } from './dto/query-channel.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { AddChannelPinDto } from './dto/add-channel-pin.dto';
 
 /**
  * 频道控制器
@@ -52,6 +52,43 @@ export class ChannelsController {
   @Get()
   async findAll(@Query() query: QueryChannelDto) {
     return this.channelsService.findAll(query);
+  }
+
+  /**
+   * 全员置顶列表
+   * GET /channels/:id/pins
+   */
+  @ApiOperation({ summary: '获取频道全员置顶（所有成员可见）' })
+  @Get(':id/pins')
+  async getChannelPins(@Param('id') channelId: string) {
+    return { pins: await this.channelsService.getChannelPins(channelId) };
+  }
+
+  /**
+   * 添加全员置顶
+   * POST /channels/:id/pins
+   */
+  @ApiOperation({ summary: '全员置顶一条消息（频道成员均可，任意成员可取消）' })
+  @Post(':id/pins')
+  @HttpCode(HttpStatus.CREATED)
+  async addChannelPin(@Param('id') channelId: string, @Body() dto: AddChannelPinDto) {
+    const pins = await this.channelsService.addChannelPin(channelId, dto.userId, dto.messageId);
+    return { pins };
+  }
+
+  /**
+   * 取消全员置顶
+   * POST /channels/:id/pins/remove
+   */
+  @ApiOperation({ summary: '取消全员置顶（任意频道成员）' })
+  @Post(':id/pins/remove')
+  @HttpCode(HttpStatus.OK)
+  async removeChannelPin(
+    @Param('id') channelId: string,
+    @Body() body: { userId: string; messageId: string },
+  ) {
+    const pins = await this.channelsService.removeChannelPin(channelId, body.userId, body.messageId);
+    return { pins };
   }
 
   /**
