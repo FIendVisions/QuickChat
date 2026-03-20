@@ -5,7 +5,7 @@ import { X, Monitor, Video } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
 import { DEFAULT_ICE_SERVERS } from '@/lib/webrtcConfig';
 
-interface LiveWatchModalProps {
+interface LiveWatchEmbedProps {
   socket: Socket | null;
   channelId: string;
   broadcasterUserId: string;
@@ -16,10 +16,10 @@ interface LiveWatchModalProps {
 }
 
 /**
- * 观众端：请求观看指定用户的屏幕 + 摄像头 WebRTC 流。
- * 与主播端 addTrack 顺序一致：先屏幕后摄像头 → 第一路视频进主画面，第二路进画中画。
+ * 嵌入聊天区：观看同频道用户的屏幕/摄像头 WebRTC。
+ * ICE 在 setRemoteDescription(offer) 之前到达时会先入队，避免一直连不上。
  */
-export function LiveWatchModal({
+export function LiveWatchEmbed({
   socket,
   channelId,
   broadcasterUserId,
@@ -27,7 +27,7 @@ export function LiveWatchModal({
   hasScreen,
   hasCamera,
   onClose,
-}: LiveWatchModalProps) {
+}: LiveWatchEmbedProps) {
   const screenVideoRef = useRef<HTMLVideoElement>(null);
   const camVideoRef = useRef<HTMLVideoElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -35,10 +35,9 @@ export function LiveWatchModal({
   const [screenLive, setScreenLive] = useState(false);
   const [camLive, setCamLive] = useState(false);
 
-  const stopAll = useCallback(() => {
-    const sock = socket;
-    if (sock?.connected && channelId) {
-      sock.emit('webrtc:watch-stop', {
+  const teardown = useCallback(() => {
+    if (socket?.connected && channelId) {
+      socket.emit('webrtc:watch-stop', {
         channelId,
         targetUserId: broadcasterUserId,
       });
@@ -50,9 +49,9 @@ export function LiveWatchModal({
   }, [socket, channelId, broadcasterUserId]);
 
   const handleClose = useCallback(() => {
-    stopAll();
+    teardown();
     onClose();
-  }, [stopAll, onClose]);
+  }, [teardown, onClose]);
 
   useEffect(() => {
     if (!socket || !channelId) {
@@ -61,7 +60,25 @@ export function LiveWatchModal({
     }
 
     let videoCount = 0;
-    const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
+    const pendingIce: RTCIceCandidateInit[] = [];
+    let remoteOfferSet = false;
+
+    const flushIce = async (pc: RTCPeerConnection) => {
+      while (pendingIce.length > 0) {
+        const c = pendingIce.shift();
+        if (!c) continue;
+        try {
+          await pc.addIceCandidate(c);
+        } catch (e) {
+          console.warn('[live/viewer] addIceCandidate', e);
+        }
+      }
+    };
+
+    const pc = new RTCPeerConnection({
+      iceServers: DEFAULT_ICE_SERVERS,
+      iceCandidatePoolSize: 0,
+    });
     pcRef.current = pc;
 
     pc.onicecandidate = (ev) => {
@@ -94,7 +111,7 @@ export function LiveWatchModal({
       const s = pc.connectionState;
       if (s === 'connected') setStatus('直播中');
       else if (s === 'connecting' || s === 'new') setStatus('正在连接…');
-      else if (s === 'failed' || s === 'disconnected') setStatus('连接中断');
+      else if (s === 'failed' || s === 'disconnected') setStatus('连接中断，请关闭后重试');
       else if (s === 'closed') setStatus('已结束');
     };
 
@@ -110,6 +127,8 @@ export function LiveWatchModal({
       try {
         if (data.type === 'offer' && data.sdp) {
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          remoteOfferSet = true;
+          await flushIce(pc);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket.emit('webrtc:signal', {
@@ -119,7 +138,11 @@ export function LiveWatchModal({
             sdp: { type: answer.type, sdp: answer.sdp },
           });
         } else if (data.type === 'ice-candidate' && data.candidate) {
-          await pc.addIceCandidate(data.candidate);
+          if (!remoteOfferSet) {
+            pendingIce.push(data.candidate);
+          } else {
+            await pc.addIceCandidate(data.candidate);
+          }
         }
       } catch (e) {
         console.warn('[live/viewer] signal error', e);
@@ -151,80 +174,73 @@ export function LiveWatchModal({
   const showCamPip = hasScreen && hasCamera;
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal
-      aria-labelledby="live-watch-title"
-    >
-      <div className="relative flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-border-color bg-bg-secondary shadow-2xl">
-        <div className="flex shrink-0 items-center justify-between border-b border-border-color px-4 py-2">
-          <div className="min-w-0">
-            <h2 id="live-watch-title" className="truncate text-sm font-semibold text-text-normal">
-              正在观看：{broadcasterName}
-            </h2>
-            <p className="text-[11px] text-text-muted">{status}</p>
+    <div className="flex min-h-[180px] max-h-[min(42vh,420px)] shrink-0 flex-col border-b border-border-color bg-bg-tertiary/40">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border-color/80 bg-bg-secondary/90 px-3 py-1.5">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-semibold text-text-normal">
+            直播：{broadcasterName}
+          </p>
+          <p className="text-[10px] text-text-muted">{status}</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleClose}
+          className="shrink-0 rounded-md p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+          title="关闭直播画面"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="relative min-h-[140px] flex-1 bg-black">
+        <video
+          ref={screenVideoRef}
+          className="h-full max-h-[min(38vh,380px)] w-full object-contain"
+          playsInline
+          muted
+          autoPlay
+        />
+        {!screenLive && (hasScreen || hasCamera) && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs text-text-muted">
+            等待画面…
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="rounded-lg p-2 text-text-muted hover:bg-bg-hover hover:text-text-normal"
-            title="关闭"
-          >
-            <X size={20} />
-          </button>
-        </div>
+        )}
 
-        <div className="relative min-h-[240px] flex-1 bg-black">
-          <video
-            ref={screenVideoRef}
-            className="h-full w-full object-contain"
-            playsInline
-            muted
-            autoPlay
-          />
-          {!screenLive && (hasScreen || hasCamera) && (
-            <div className="absolute inset-0 flex items-center justify-center text-sm text-text-muted">
-              等待画面…
-            </div>
-          )}
-
-          {showCamPip && (
-            <div className="absolute bottom-3 right-3 w-[min(28%,220px)] overflow-hidden rounded-lg border-2 border-primary/60 bg-black shadow-lg">
-              <div className="flex items-center gap-1 bg-bg-secondary/90 px-2 py-0.5 text-[10px] text-text-muted">
-                <Video size={10} />
-                摄像头
-              </div>
-              <video
-                ref={camVideoRef}
-                className="aspect-video w-full object-cover"
-                playsInline
-                muted
-                autoPlay
-              />
-              {!camLive && (
-                <div className="absolute inset-0 top-5 flex items-center justify-center bg-black/80 text-[10px] text-text-muted">
-                  等待摄像头…
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex shrink-0 flex-wrap gap-2 border-t border-border-color px-3 py-2 text-[11px] text-text-muted">
-          {hasScreen && (
-            <span className="flex items-center gap-1 rounded bg-bg-tertiary px-2 py-0.5">
-              <Monitor size={12} />
-              屏幕共享
-            </span>
-          )}
-          {hasCamera && (
-            <span className="flex items-center gap-1 rounded bg-bg-tertiary px-2 py-0.5">
-              <Video size={12} />
+        {showCamPip && (
+          <div className="absolute bottom-2 right-2 w-[min(32%,200px)] overflow-hidden rounded-md border border-primary/50 bg-black shadow-md">
+            <div className="flex items-center gap-0.5 bg-bg-secondary/95 px-1.5 py-0.5 text-[9px] text-text-muted">
+              <Video size={9} />
               摄像头
-            </span>
-          )}
-        </div>
+            </div>
+            <video
+              ref={camVideoRef}
+              className="aspect-video w-full object-cover"
+              playsInline
+              muted
+              autoPlay
+            />
+            {!camLive && (
+              <div className="absolute inset-0 top-4 flex items-center justify-center bg-black/75 text-[9px] text-text-muted">
+                等待…
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 flex-wrap gap-1.5 px-2 py-1 text-[10px] text-text-muted">
+        {hasScreen && (
+          <span className="flex items-center gap-0.5 rounded bg-bg-tertiary px-1.5 py-0.5">
+            <Monitor size={10} />
+            屏幕
+          </span>
+        )}
+        {hasCamera && (
+          <span className="flex items-center gap-0.5 rounded bg-bg-tertiary px-1.5 py-0.5">
+            <Video size={10} />
+            摄像头
+          </span>
+        )}
       </div>
     </div>
   );

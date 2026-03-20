@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Crown, Shield, PanelRightClose, PanelRightOpen, Monitor, Video } from 'lucide-react';
 import { useWebSocket } from '@/contexts/WebSocketContext';
-import { LiveWatchModal } from '@/components/live/LiveWatchModal';
+import { useLiveWatch } from '@/contexts/LiveWatchContext';
 
 interface MemberInfo {
   userId: string;
@@ -127,16 +127,11 @@ function SectionLabel({ children }: { children: ReactNode }) {
 
 export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isOwner }: ChannelMembersProps) {
   const { socket } = useWebSocket();
+  const { setTarget: setLiveWatchTarget } = useLiveWatch();
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [mediaByUser, setMediaByUser] = useState<Record<string, MemberMedia>>({});
-  const [watchTarget, setWatchTarget] = useState<{
-    userId: string;
-    username: string;
-    screen: boolean;
-    camera: boolean;
-  } | null>(null);
 
   const loadMembers = useCallback(async () => {
     setLoading(true);
@@ -288,9 +283,10 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
                       media={mediaByUser[m.userId]}
                       isSelf={m.userId === currentUserId}
                       onWatchLive={() =>
-                        setWatchTarget({
-                          userId: m.userId,
-                          username: m.username,
+                        setLiveWatchTarget({
+                          channelId,
+                          broadcasterUserId: m.userId,
+                          broadcasterName: m.username,
                           screen: !!mediaByUser[m.userId]?.screen,
                           camera: !!mediaByUser[m.userId]?.camera,
                         })
@@ -311,9 +307,10 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
                       media={mediaByUser[m.userId]}
                       isSelf={m.userId === currentUserId}
                       onWatchLive={() =>
-                        setWatchTarget({
-                          userId: m.userId,
-                          username: m.username,
+                        setLiveWatchTarget({
+                          channelId,
+                          broadcasterUserId: m.userId,
+                          broadcasterName: m.username,
                           screen: !!mediaByUser[m.userId]?.screen,
                           camera: !!mediaByUser[m.userId]?.camera,
                         })
@@ -330,17 +327,6 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
         )}
       </div>
 
-      {watchTarget && (
-        <LiveWatchModal
-          socket={socket}
-          channelId={channelId}
-          broadcasterUserId={watchTarget.userId}
-          broadcasterName={watchTarget.username}
-          hasScreen={watchTarget.screen}
-          hasCamera={watchTarget.camera}
-          onClose={() => setWatchTarget(null)}
-        />
-      )}
     </aside>
   );
 }

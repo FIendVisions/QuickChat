@@ -12,8 +12,14 @@ interface UseLivePublisherOptions {
   camStreamRef: React.MutableRefObject<MediaStream | null>;
 }
 
+interface PeerIceMeta {
+  pending: RTCIceCandidateInit[];
+  remoteAnswerSet: boolean;
+}
+
 /**
- * 作为「主播」：响应其他成员的 webrtc:watch-request，为每个观众建独立 RTCPeerConnection。
+ * 作为「主播」：响应 webrtc:watch-request，为每个观众建独立 RTCPeerConnection。
+ * 观众 ICE 若早于 answer 的 setRemoteDescription 到达，先入队再 flush。
  */
 export function useLivePublisher({
   socket,
@@ -23,6 +29,7 @@ export function useLivePublisher({
   camStreamRef,
 }: UseLivePublisherOptions) {
   const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const peerIceRef = useRef<Map<string, PeerIceMeta>>(new Map());
 
   const removePeer = useCallback((viewerId: string) => {
     const pc = peersRef.current.get(viewerId);
@@ -30,6 +37,7 @@ export function useLivePublisher({
       pc.close();
       peersRef.current.delete(viewerId);
     }
+    peerIceRef.current.delete(viewerId);
   }, []);
 
   const handleRemoteSignal = useCallback(
@@ -46,11 +54,31 @@ export function useLivePublisher({
       const pc = peersRef.current.get(data.fromUserId);
       if (!pc) return;
 
+      let meta = peerIceRef.current.get(data.fromUserId);
+      if (!meta) {
+        meta = { pending: [], remoteAnswerSet: false };
+        peerIceRef.current.set(data.fromUserId, meta);
+      }
+
       try {
         if (data.type === 'answer' && data.sdp) {
           await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+          meta.remoteAnswerSet = true;
+          const copy = [...meta.pending];
+          meta.pending.length = 0;
+          for (const c of copy) {
+            try {
+              await pc.addIceCandidate(c);
+            } catch (e) {
+              console.warn('[live/publisher] flush ice', e);
+            }
+          }
         } else if (data.type === 'ice-candidate' && data.candidate) {
-          await pc.addIceCandidate(data.candidate);
+          if (!meta.remoteAnswerSet) {
+            meta.pending.push(data.candidate);
+          } else {
+            await pc.addIceCandidate(data.candidate);
+          }
         }
       } catch (e) {
         console.warn('[live/publisher] signal handling failed', e);
@@ -64,6 +92,7 @@ export function useLivePublisher({
       if (!socket || !channelId) return;
 
       removePeer(viewerId);
+      peerIceRef.current.set(viewerId, { pending: [], remoteAnswerSet: false });
 
       const screen = screenStreamRef.current;
       const cam = camStreamRef.current;
@@ -154,6 +183,7 @@ export function useLivePublisher({
     return () => {
       peersRef.current.forEach((pc) => pc.close());
       peersRef.current.clear();
+      peerIceRef.current.clear();
     };
   }, [channelId]);
 }

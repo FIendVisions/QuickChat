@@ -12,6 +12,8 @@ import { ChannelSettingsModal } from '@/components/channel/ChannelSettingsModal'
 import { PublicChannelBrowser } from '@/components/channel/PublicChannelBrowser';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
+import { LiveWatchProvider } from '@/contexts/LiveWatchContext';
+import { LiveWatchSlot } from '@/components/live/LiveWatchSlot';
 import { Channel } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
@@ -375,6 +377,7 @@ export default function HomePage() {
 
   return (
     <WebSocketProvider userId={user.id} token={token || undefined}>
+      <LiveWatchProvider>
       <div className="flex h-screen flex-col bg-bg-primary">
         <TopBar
           username={user.username}
@@ -442,6 +445,8 @@ export default function HomePage() {
                       )}
                     </div>
                   </div>
+
+                  <LiveWatchSlot channelId={selectedChannel.id} />
 
                   {/* 消息区 + 成员区同高，输入框仅在左侧（Discord 布局） */}
                   <div className="flex min-h-0 flex-1 overflow-hidden">
@@ -529,6 +534,7 @@ export default function HomePage() {
           <button onClick={() => setError(null)} className="ml-4 text-white hover:text-gray-200">✕</button>
         </div>
       )}
+      </LiveWatchProvider>
     </WebSocketProvider>
   );
 }
