@@ -53,4 +53,9 @@ export class CreateChannelDto {
   @IsOptional()
   @IsEnum(ChannelKind)
   kind?: ChannelKind;
+
+  @ApiPropertyOptional({ description: '所属频道分组 ID（服务器内）' })
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
 }

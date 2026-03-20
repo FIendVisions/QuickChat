@@ -10,6 +10,8 @@ import {
   Headphones,
   Video,
   VideoOff,
+  Settings,
+  LogOut,
 } from 'lucide-react';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useLivePublisher } from '@/hooks/useLivePublisher';
@@ -19,15 +21,15 @@ const OUTPUT_VOLUME_KEY = 'quickchat_output_volume_v1';
 interface UserSelfPanelProps {
   username: string;
   email?: string;
-  /** 当前选中的频道（未选时为 null，不向该频道广播媒体状态） */
   channelId: string | null;
   userId: string;
+  onLogout?: () => void;
 }
 
 /**
- * 左下角：用户信息 + 本地媒体；并向当前频道广播屏幕/摄像头状态，供 WebRTC 直播给成员观看。
+ * Discord 风格底栏：头像 + 昵称 + 麦克风 / 耳机 / 设置；直播与音量收在设置浮层。
  */
-export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPanelProps) {
+export function UserSelfPanel({ username, email, channelId, userId, onLogout }: UserSelfPanelProps) {
   const { socket } = useWebSocket();
   const [micOn, setMicOn] = useState(false);
   const [deafened, setDeafened] = useState(false);
@@ -35,6 +37,8 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
   const [screenOn, setScreenOn] = useState(false);
   const [outputVol, setOutputVol] = useState(80);
   const [hint, setHint] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const micStreamRef = useRef<MediaStream | null>(null);
   const camStreamRef = useRef<MediaStream | null>(null);
@@ -49,6 +53,14 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
     screenOn,
     camOn,
   });
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    if (menuOpen) document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [menuOpen]);
 
   useEffect(() => {
     try {
@@ -97,7 +109,6 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
     [socket, channelId, userId, username],
   );
 
-  /* 同步屏幕/摄像头状态到成员列表（延迟一点确保已 join:channel） */
   useEffect(() => {
     if (!socket?.connected || !channelId) return;
     const t = window.setTimeout(() => {
@@ -106,7 +117,6 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
     return () => window.clearTimeout(t);
   }, [socket, channelId, screenOn, camOn, broadcastMediaState]);
 
-  /** Socket 重连后服务端内存状态可能清空，再次声明当前是否在播 */
   useEffect(() => {
     if (!socket) return;
     const onConnect = () => {
@@ -124,7 +134,6 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
   const usernameRef = useRef(username);
   usernameRef.current = username;
 
-  /* 离开频道或切换频道时关闭直播状态广播（避免因 username 变化误发） */
   useEffect(() => {
     const cid = channelId;
     const uid = userId;
@@ -241,95 +250,112 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
     };
   }, [stopMic, stopCam, stopScreen]);
 
-  const iconBtn = (active: boolean, warn?: boolean) =>
-    `flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors ${
-      active
-        ? warn
-          ? 'border-warning bg-warning/15 text-warning'
-          : 'border-success bg-success/15 text-success'
-        : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover hover:text-text-normal'
-    }`;
+  const iconBtn =
+    'flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active';
+
+  const shortId = userId.length > 6 ? userId.slice(0, 4) : userId;
 
   return (
-    <div className="shrink-0 border-t border-border-color bg-bg-secondary p-2 shadow-[0_-4px_12px_rgba(0,0,0,0.12)]">
-      <div className="flex items-center gap-2">
+    <div ref={menuRef} className="relative shrink-0 bg-dc-userbar px-2 py-1">
+      <div className="flex h-[52px] items-center gap-1 rounded-[4px] bg-[#111214] px-1">
         <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5865f2] text-xs font-semibold text-white"
           aria-hidden
         >
           {(username || '?').charAt(0).toUpperCase()}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-text-normal">{username}</p>
-          {email ? (
-            <p className="truncate text-[10px] text-text-muted">{email}</p>
-          ) : (
-            <p className="truncate text-[10px] text-text-muted">本地媒体 / 直播</p>
+        <div className="min-w-0 flex-1 py-0.5">
+          <p className="truncate text-[13px] font-semibold leading-tight text-dc-channel-text-active">{username}</p>
+          <p className="truncate text-[11px] leading-tight text-dc-channel-text">
+            {email || `在线 · ${shortId}`}
+          </p>
+        </div>
+        <button
+          type="button"
+          className={iconBtn}
+          title={micOn ? '关闭麦克风' : '开启麦克风'}
+          onClick={toggleMic}
+        >
+          {micOn ? <Mic size={18} className="text-[#23a559]" /> : <MicOff size={18} />}
+        </button>
+        <button
+          type="button"
+          className={iconBtn}
+          title={deafened ? '取消静音收听' : '静音收听'}
+          onClick={() => setDeafened((d) => !d)}
+        >
+          <Headphones size={18} className={deafened ? 'text-[#f23f43]' : ''} />
+        </button>
+        <button
+          type="button"
+          className={`${iconBtn} ${menuOpen ? 'bg-dc-channel-hover text-dc-channel-text-active' : ''}`}
+          title="用户设置"
+          onClick={() => setMenuOpen((o) => !o)}
+        >
+          <Settings size={18} />
+        </button>
+      </div>
+
+      {menuOpen && (
+        <div className="absolute bottom-[calc(100%+8px)] right-2 z-50 w-[260px] rounded-md border border-black/40 bg-[#111214] py-1 shadow-xl">
+          <div className="border-b border-white/5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-dc-channel-text">
+            直播与屏幕
+          </div>
+          <div className="flex flex-wrap gap-1 p-2">
+            <button
+              type="button"
+              onClick={toggleScreen}
+              className={`flex flex-1 min-w-[44%] items-center justify-center gap-1 rounded px-2 py-1.5 text-xs ${
+                screenOn ? 'bg-[#23a559]/20 text-[#23a559]' : 'bg-dc-channel-hover text-dc-channel-text-active'
+              }`}
+            >
+              {screenOn ? <MonitorOff size={14} /> : <MonitorUp size={14} />}
+              屏幕
+            </button>
+            <button
+              type="button"
+              onClick={toggleCam}
+              className={`flex flex-1 min-w-[44%] items-center justify-center gap-1 rounded px-2 py-1.5 text-xs ${
+                camOn ? 'bg-primary/20 text-primary' : 'bg-dc-channel-hover text-dc-channel-text-active'
+              }`}
+            >
+              {camOn ? <VideoOff size={14} /> : <Video size={14} />}
+              摄像头
+            </button>
+          </div>
+          <div className="flex items-center gap-2 border-t border-white/5 px-2 py-2">
+            <Volume2 size={14} className="shrink-0 text-dc-channel-text" />
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={outputVol}
+              disabled={deafened}
+              onChange={(e) => setOutputVol(Number(e.target.value))}
+              className="h-1 flex-1 cursor-pointer accent-[#5865f2] disabled:opacity-40"
+            />
+            <span className="w-6 text-right text-[10px] tabular-nums text-dc-channel-text">
+              {deafened ? '—' : outputVol}
+            </span>
+          </div>
+          {hint && <p className="px-2 pb-2 text-[11px] text-[#f0b232]">{hint}</p>}
+          {onLogout && (
+            <>
+              <div className="my-1 h-px bg-white/5" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 px-2 py-2 text-sm text-[#f23f43] hover:bg-[#f23f43]/10"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onLogout();
+                }}
+              >
+                <LogOut size={16} />
+                退出登录
+              </button>
+            </>
           )}
         </div>
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center gap-1">
-        <button
-          type="button"
-          className={iconBtn(micOn)}
-          onClick={toggleMic}
-          title={micOn ? '关闭麦克风' : '开启麦克风'}
-        >
-          {micOn ? <Mic size={18} /> : <MicOff size={18} />}
-        </button>
-        <button
-          type="button"
-          className={iconBtn(deafened, true)}
-          onClick={() => setDeafened((d) => !d)}
-          title={deafened ? '取消静音收听' : '静音收听（本地）'}
-        >
-          <Headphones size={18} />
-        </button>
-        <button
-          type="button"
-          className={iconBtn(screenOn)}
-          onClick={toggleScreen}
-          title={screenOn ? '停止屏幕共享' : '屏幕共享'}
-        >
-          {screenOn ? <MonitorOff size={18} /> : <MonitorUp size={18} />}
-        </button>
-        <button
-          type="button"
-          className={iconBtn(camOn)}
-          onClick={toggleCam}
-          title={camOn ? '关闭摄像头' : '开启摄像头'}
-        >
-          {camOn ? <Video size={18} /> : <VideoOff size={18} />}
-        </button>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2">
-        <Volume2
-          size={14}
-          className={`shrink-0 text-text-muted ${deafened ? 'opacity-35' : ''}`}
-          aria-hidden
-        />
-        <input
-          type="range"
-          min={0}
-          max={100}
-          value={outputVol}
-          disabled={deafened}
-          onChange={(e) => setOutputVol(Number(e.target.value))}
-          className="h-1 flex-1 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-40"
-          title="收听音量（本地设置，可对接语音输出）"
-          aria-label="收听音量"
-        />
-        <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-text-muted">
-          {deafened ? '—' : outputVol}
-        </span>
-      </div>
-
-      {hint && (
-        <p className="mt-1.5 rounded bg-bg-tertiary px-1.5 py-1 text-[10px] leading-snug text-warning">
-          {hint}
-        </p>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import type { ServerSummary } from '@/types/server.types';
+import type { ServerCategory, ServerSummary } from '@/types/server.types';
 import { getApiOrigin } from '@/lib/serverOrigin';
 
 function getAuthHeaders(): HeadersInit {
@@ -66,6 +66,45 @@ export const serverApi = {
     if (!response.ok) {
       const err = await response.json().catch(() => null);
       throw new Error(err?.message || '删除服务器失败');
+    }
+  },
+
+  async listCategories(serverId: string, userId: string): Promise<ServerCategory[]> {
+    const params = new URLSearchParams({ userId });
+    const response = await fetch(`${getApiOrigin()}/servers/${serverId}/categories?${params}`, {
+      headers: getAuthHeaders(),
+    });
+    const data = await handleResponse(response);
+    return data.categories || [];
+  },
+
+  async createCategory(serverId: string, userId: string, name: string): Promise<ServerCategory> {
+    const response = await fetch(`${getApiOrigin()}/servers/${serverId}/categories`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ userId, name }),
+    });
+    return handleResponse(response);
+  },
+
+  async updateCategory(serverId: string, categoryId: string, userId: string, name: string): Promise<ServerCategory> {
+    const response = await fetch(`${getApiOrigin()}/servers/${serverId}/categories/${categoryId}`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ userId, name }),
+    });
+    return handleResponse(response);
+  },
+
+  async deleteCategory(serverId: string, categoryId: string, userId: string): Promise<void> {
+    const params = new URLSearchParams({ userId });
+    const response = await fetch(
+      `${getApiOrigin()}/servers/${serverId}/categories/${categoryId}?${params}`,
+      { method: 'DELETE', headers: getAuthHeaders() },
+    );
+    if (!response.ok) {
+      const err = await response.json().catch(() => null);
+      throw new Error(err?.message || '删除分组失败');
     }
   },
 };

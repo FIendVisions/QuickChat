@@ -1,8 +1,8 @@
 // backend/src/modules/channels/dto/update-channel.dto.ts
 
-import { IsString, IsOptional, IsNumber, IsEnum, Min, Max, Length } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsEnum, Min, Max, Length, ValidateIf } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { ChannelType } from '../../../common/types';
+import { ChannelType, ChannelKind } from '../../../common/types';
 
 /**
  * 更新频道 DTO
@@ -50,4 +50,15 @@ export class UpdateChannelDto {
   @IsString()
   @Length(0, 100, { message: '密码不能超过 100 字符' })
   password?: string;
+
+  @ApiPropertyOptional({ description: '频道形态', enum: ChannelKind })
+  @IsOptional()
+  @IsEnum(ChannelKind)
+  kind?: ChannelKind;
+
+  @ApiPropertyOptional({ description: '频道分组 ID；传 null 表示移出分组' })
+  @IsOptional()
+  @ValidateIf((_, v) => v != null && v !== '')
+  @IsString()
+  categoryId?: string | null;
 }

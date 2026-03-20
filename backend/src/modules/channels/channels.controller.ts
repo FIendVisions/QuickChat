@@ -22,6 +22,7 @@ import * as fs from 'fs';
 import { randomUUID } from 'crypto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ChannelsService } from './channels.service';
+import { ChannelForumService } from './channel-forum.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ChannelOwnerGuard } from '../../common/guards/channel-owner.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -32,6 +33,9 @@ import { JoinChannelDto } from './dto/join-channel.dto';
 import { QueryChannelDto } from './dto/query-channel.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { AddChannelPinDto } from './dto/add-channel-pin.dto';
+import { CreateForumPostDto } from './dto/create-forum-post.dto';
+import { ForumCommentDto } from './dto/forum-comment.dto';
+import { UpdateForumPostDto } from './dto/update-forum-post.dto';
 
 /**
  * 频道控制器
@@ -42,7 +46,10 @@ import { AddChannelPinDto } from './dto/add-channel-pin.dto';
 // @UseGuards(JwtAuthGuard) // 临时禁用 JWT 守卫以进行测试
 @Controller('channels')
 export class ChannelsController {
-  constructor(private readonly channelsService: ChannelsService) {}
+  constructor(
+    private readonly channelsService: ChannelsService,
+    private readonly channelForumService: ChannelForumService,
+  ) {}
 
   /**
    * 获取频道列表
@@ -89,6 +96,76 @@ export class ChannelsController {
   ) {
     const pins = await this.channelsService.removeChannelPin(channelId, body.userId, body.messageId);
     return { pins };
+  }
+
+  // ---------- 论坛频道（须放在 GET :id 之前）----------
+
+  @ApiOperation({ summary: '论坛帖子列表（标题搜索 q）' })
+  @ApiQuery({ name: 'userId', required: true })
+  @ApiQuery({ name: 'q', required: false })
+  @Get(':id/forum/posts')
+  async forumListPosts(
+    @Param('id') channelId: string,
+    @Query('userId') userId: string,
+    @Query('q') q?: string,
+  ) {
+    if (!userId) throw new BadRequestException('userId is required');
+    return this.channelForumService.listPosts(channelId, userId, q);
+  }
+
+  @ApiOperation({ summary: '发布论坛帖子' })
+  @Post(':id/forum/posts')
+  @HttpCode(HttpStatus.CREATED)
+  async forumCreatePost(@Param('id') channelId: string, @Body() dto: CreateForumPostDto) {
+    return this.channelForumService.createPost(channelId, dto.userId, dto.title, dto.content ?? '');
+  }
+
+  @ApiOperation({ summary: '论坛帖子详情（含评论、点赞状态）' })
+  @ApiQuery({ name: 'userId', required: true })
+  @Get(':id/forum/posts/:postId')
+  async forumGetPost(
+    @Param('id') channelId: string,
+    @Param('postId') postId: string,
+    @Query('userId') userId: string,
+  ) {
+    if (!userId) throw new BadRequestException('userId is required');
+    return this.channelForumService.getPostDetail(channelId, postId, userId);
+  }
+
+  @ApiOperation({ summary: '论坛帖子留言' })
+  @Post(':id/forum/posts/:postId/comments')
+  @HttpCode(HttpStatus.CREATED)
+  async forumAddComment(
+    @Param('id') channelId: string,
+    @Param('postId') postId: string,
+    @Body() dto: ForumCommentDto,
+  ) {
+    return this.channelForumService.addComment(channelId, postId, dto.userId, dto.content);
+  }
+
+  @ApiOperation({ summary: '切换论坛帖子点赞' })
+  @Post(':id/forum/posts/:postId/like')
+  @HttpCode(HttpStatus.OK)
+  async forumToggleLike(
+    @Param('id') channelId: string,
+    @Param('postId') postId: string,
+    @Body() body: { userId: string },
+  ) {
+    if (!body?.userId) throw new BadRequestException('userId is required');
+    return this.channelForumService.toggleLike(channelId, postId, body.userId);
+  }
+
+  @ApiOperation({ summary: '更新论坛帖子（作者或频道主）' })
+  @Patch(':id/forum/posts/:postId')
+  async forumUpdatePost(
+    @Param('id') channelId: string,
+    @Param('postId') postId: string,
+    @Body() dto: UpdateForumPostDto,
+  ) {
+    return this.channelForumService.updatePost(channelId, postId, dto.userId, {
+      title: dto.title,
+      content: dto.content,
+    });
   }
 
   /**

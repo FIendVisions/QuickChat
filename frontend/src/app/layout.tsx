@@ -1,18 +1,25 @@
 import './globals.css';
+import { Inter } from 'next/font/google';
+
+const inter = Inter({
+  subsets: ['latin', 'latin-ext'],
+  variable: '--font-inter',
+  display: 'swap',
+});
 
 export const metadata = {
-  title: 'QuickChat - 游戏语音开黑平台',
-  description: '类似 Discord 的游戏语音聊天系统，支持实时语音和文字聊天',
-}
+  title: 'QuickChat',
+  description: '类 Discord 的实时语音与文字聊天',
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html lang="zh-CN" className={inter.variable}>
+      <body className="font-sans antialiased">{children}</body>
     </html>
-  )
+  );
 }

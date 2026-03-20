@@ -22,6 +22,8 @@ interface ChannelMembersProps {
   channelId: string;
   userId: string;
   isOwner: boolean;
+  /** 仅成员列表滚动区，用于论坛等浮层内嵌（无侧栏标题/收起条） */
+  variant?: 'sidebar' | 'embedded';
 }
 
 interface MemberMedia {
@@ -61,7 +63,7 @@ function MemberRow({
       className={`group flex h-8 items-center gap-2 rounded px-2 ${
         canWatch
           ? 'cursor-pointer hover:bg-primary/15 focus:outline-none focus:ring-1 focus:ring-primary'
-          : 'cursor-default hover:bg-white/[0.06]'
+          : 'cursor-default hover:bg-dc-channel-hover'
       }`}
       title={
         canWatch
@@ -77,19 +79,19 @@ function MemberRow({
             className="h-8 w-8 rounded-md object-cover"
           />
         ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-tertiary text-xs font-semibold text-text-muted">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-dc-server-tile text-xs font-semibold text-dc-channel-text">
             {(member.username || '?').charAt(0).toUpperCase()}
           </div>
         )}
         <div
-          className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-[2px] border-bg-secondary ${
+          className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-[2px] border-dc-channels ${
             member.isOnline ? 'bg-[#23a559]' : 'bg-[#80848e]'
           }`}
         />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
-          <span className="truncate text-[13px] font-medium leading-none text-text-normal">
+          <span className="truncate text-[13px] font-medium leading-none text-dc-channel-text-active">
             {member.username}
           </span>
           {member.role === 'OWNER' && (
@@ -117,14 +119,19 @@ function MemberRow({
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <div className="px-2 pb-0.5 pt-2 first:pt-1">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted/80">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.02em] text-dc-channel-text">
         {children}
       </span>
     </div>
   );
 }
 
-export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isOwner }: ChannelMembersProps) {
+export function ChannelMembers({
+  channelId,
+  userId: currentUserId,
+  isOwner: _isOwner,
+  variant = 'sidebar',
+}: ChannelMembersProps) {
   const { socket } = useWebSocket();
   const { setTarget: setLiveWatchTarget } = useLiveWatch();
   const [members, setMembers] = useState<MemberInfo[]>([]);
@@ -249,19 +256,85 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
     return { online: on, offline: off };
   }, [members]);
 
+  const listBody = loading ? (
+    <div className="px-3 py-2 text-xs text-dc-channel-text">加载中…</div>
+  ) : (
+    <>
+      {online.length > 0 && (
+        <>
+          <SectionLabel>在线 — {online.length}</SectionLabel>
+          <div className="space-y-0.5 px-1 pb-1">
+            {online.map((m) => (
+              <MemberRow
+                key={m.userId}
+                member={m}
+                media={mediaByUser[m.userId]}
+                isSelf={m.userId === currentUserId}
+                onWatchLive={() =>
+                  setLiveWatchTarget({
+                    channelId,
+                    broadcasterUserId: m.userId,
+                    broadcasterName: m.username,
+                    screen: !!mediaByUser[m.userId]?.screen,
+                    camera: !!mediaByUser[m.userId]?.camera,
+                  })
+                }
+              />
+            ))}
+          </div>
+        </>
+      )}
+      {offline.length > 0 && (
+        <>
+          <SectionLabel>离线 — {offline.length}</SectionLabel>
+          <div className="space-y-0.5 px-1 pb-2">
+            {offline.map((m) => (
+              <MemberRow
+                key={m.userId}
+                member={m}
+                media={mediaByUser[m.userId]}
+                isSelf={m.userId === currentUserId}
+                onWatchLive={() =>
+                  setLiveWatchTarget({
+                    channelId,
+                    broadcasterUserId: m.userId,
+                    broadcasterName: m.username,
+                    screen: !!mediaByUser[m.userId]?.screen,
+                    camera: !!mediaByUser[m.userId]?.camera,
+                  })
+                }
+              />
+            ))}
+          </div>
+        </>
+      )}
+      {members.length === 0 && (
+        <p className="px-3 py-4 text-center text-xs text-dc-channel-text">暂无成员</p>
+      )}
+    </>
+  );
+
+  if (variant === 'embedded') {
+    return (
+      <div className="flex h-full min-h-0 w-full flex-col bg-dc-channels">
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">{listBody}</div>
+      </div>
+    );
+  }
+
   if (collapsed) {
     return (
-      <div className="flex h-full w-[52px] shrink-0 flex-col items-center border-l border-border-color bg-bg-secondary py-2">
+      <div className="flex h-full w-[52px] shrink-0 flex-col items-center border-l border-black/20 bg-dc-channels py-2">
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+          className="rounded p-1.5 text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active"
           title="显示成员列表"
         >
           <PanelRightOpen size={18} />
         </button>
-        <div className="mt-2 flex flex-col items-center gap-0.5 text-[10px] text-text-muted">
-          <span className="font-semibold text-text-normal">{members.length}</span>
+        <div className="mt-2 flex flex-col items-center gap-0.5 text-[10px] text-dc-channel-text">
+          <span className="font-semibold text-dc-channel-text-active">{members.length}</span>
           <span className="text-[#23a559]">{online.length}</span>
         </div>
       </div>
@@ -269,81 +342,22 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
   }
 
   return (
-    <aside className="flex h-full w-[232px] shrink-0 flex-col border-l border-border-color bg-bg-secondary">
-      {/* 顶栏：极窄，类似 Discord「成员」标题区 */}
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color/80 px-2">
-        <span className="pl-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+    <aside className="flex h-full w-[240px] shrink-0 flex-col border-l border-black/20 bg-dc-channels">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-black/20 px-3 shadow-dc-header">
+        <span className="text-xs font-semibold uppercase tracking-[0.02em] text-dc-channel-text">
           成员 — {members.length}
         </span>
         <button
           type="button"
           onClick={() => setCollapsed(true)}
-          className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+          className="rounded p-1.5 text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active"
           title="收起成员列表"
         >
           <PanelRightClose size={16} />
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
-        {loading ? (
-          <div className="px-3 py-2 text-xs text-text-muted">加载中…</div>
-        ) : (
-          <>
-            {online.length > 0 && (
-              <>
-                <SectionLabel>在线 — {online.length}</SectionLabel>
-                <div className="space-y-0.5 px-1 pb-1">
-                  {online.map((m) => (
-                    <MemberRow
-                      key={m.userId}
-                      member={m}
-                      media={mediaByUser[m.userId]}
-                      isSelf={m.userId === currentUserId}
-                      onWatchLive={() =>
-                        setLiveWatchTarget({
-                          channelId,
-                          broadcasterUserId: m.userId,
-                          broadcasterName: m.username,
-                          screen: !!mediaByUser[m.userId]?.screen,
-                          camera: !!mediaByUser[m.userId]?.camera,
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-            {offline.length > 0 && (
-              <>
-                <SectionLabel>离线 — {offline.length}</SectionLabel>
-                <div className="space-y-0.5 px-1 pb-2">
-                  {offline.map((m) => (
-                    <MemberRow
-                      key={m.userId}
-                      member={m}
-                      media={mediaByUser[m.userId]}
-                      isSelf={m.userId === currentUserId}
-                      onWatchLive={() =>
-                        setLiveWatchTarget({
-                          channelId,
-                          broadcasterUserId: m.userId,
-                          broadcasterName: m.username,
-                          screen: !!mediaByUser[m.userId]?.screen,
-                          camera: !!mediaByUser[m.userId]?.camera,
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-            {members.length === 0 && (
-              <p className="px-3 py-4 text-center text-xs text-text-muted">暂无成员</p>
-            )}
-          </>
-        )}
-      </div>
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">{listBody}</div>
 
     </aside>
   );

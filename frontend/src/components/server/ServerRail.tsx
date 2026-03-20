@@ -13,33 +13,45 @@ interface ServerRailProps {
   onJoinServer: () => void;
 }
 
-function ServerIconButton({
+function GuildSlot({
   label,
   selected,
   onClick,
   children,
+  accentClass,
+  variant = 'blurple',
 }: {
   label: string;
   selected?: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  accentClass?: string;
+  variant?: 'blurple' | 'green';
 }) {
+  const idle =
+    variant === 'green'
+      ? 'rounded-[48px] bg-dc-server-tile text-[#23a559] hover:rounded-[16px] hover:bg-[#23a559] hover:text-white'
+      : 'rounded-[48px] bg-dc-server-tile text-dc-channel-text-active hover:rounded-[16px] hover:bg-[#5865f2] hover:text-white';
   return (
-    <button
-      type="button"
-      title={label}
-      onClick={onClick}
-      className={`group relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[24px] text-lg transition-all duration-200 hover:rounded-[14px] ${
-        selected
-          ? 'rounded-[14px] bg-primary text-white'
-          : 'bg-[#313338] text-text-normal hover:bg-primary hover:text-white'
-      }`}
-    >
-      {selected && (
-        <span className="absolute -left-3 top-1/2 h-2 w-1 -translate-y-1/2 rounded-r bg-white" aria-hidden />
-      )}
-      {children}
-    </button>
+    <div className="group relative mb-2 flex w-[72px] shrink-0 justify-center">
+      <div className="pointer-events-none absolute left-0 top-1/2 z-10 flex h-[48px] w-4 -translate-y-1/2 items-center">
+        <span
+          className={`dc-guild-pill ${
+            selected ? 'h-10 opacity-100' : 'h-2 opacity-0 group-hover:h-5 group-hover:opacity-100'
+          }`}
+        />
+      </div>
+      <button
+        type="button"
+        title={label}
+        onClick={onClick}
+        className={`relative flex h-12 w-12 items-center justify-center text-lg transition-all duration-200 ease-[cubic-bezier(0.24,0.41,0.28,0.99)] ${
+          selected ? `rounded-[16px] ${accentClass ?? 'bg-[#5865f2] text-white'}` : idle
+        } `}
+      >
+        {children}
+      </button>
+    </div>
   );
 }
 
@@ -53,36 +65,42 @@ export function ServerRail({
   onJoinServer,
 }: ServerRailProps) {
   return (
-    <div className="flex h-full w-[72px] shrink-0 flex-col items-center gap-2 overflow-y-auto bg-[#1e1f22] py-2">
-      <ServerIconButton label="消息与发现" selected={homeSelected} onClick={onSelectHome}>
-        <Compass size={22} strokeWidth={1.75} />
-      </ServerIconButton>
+    <nav
+      className="flex h-full w-[72px] shrink-0 flex-col items-center overflow-y-auto overflow-x-hidden bg-dc-guilds py-2"
+      aria-label="服务器列表"
+    >
+      <GuildSlot
+        label="私信与发现"
+        selected={homeSelected}
+        onClick={onSelectHome}
+        accentClass="bg-[#5865f2] text-white"
+      >
+        <Compass size={22} strokeWidth={1.75} className={homeSelected ? 'text-white' : ''} />
+      </GuildSlot>
 
-      <div className="mx-auto h-px w-8 bg-white/10" />
+      <div className="mx-auto mb-2 h-[2px] w-8 shrink-0 rounded-full bg-dc-separator" role="separator" />
 
       {servers.map((s) => (
-        <ServerIconButton
+        <GuildSlot
           key={s.id}
           label={s.name}
           selected={!homeSelected && selectedServerId === s.id}
           onClick={() => onSelectServer(s)}
+          accentClass="bg-[#5865f2] text-white"
         >
-          <span className="text-base leading-none">{s.icon?.trim() || s.name.charAt(0).toUpperCase()}</span>
-        </ServerIconButton>
+          <span className="text-[15px] font-semibold leading-none">
+            {s.icon?.trim() || s.name.charAt(0).toUpperCase()}
+          </span>
+        </GuildSlot>
       ))}
 
-      <ServerIconButton label="添加服务器" onClick={onAddServer}>
-        <Plus size={22} strokeWidth={2} />
-      </ServerIconButton>
+      <GuildSlot label="添加服务器" onClick={onAddServer} variant="green">
+        <Plus size={22} strokeWidth={2.5} />
+      </GuildSlot>
 
-      <button
-        type="button"
-        title="通过邀请码加入"
-        onClick={onJoinServer}
-        className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[24px] bg-[#313338] text-success transition-all duration-200 hover:rounded-[14px] hover:bg-success hover:text-white"
-      >
+      <GuildSlot label="加入服务器" onClick={onJoinServer} variant="green">
         <LogIn size={20} strokeWidth={2} />
-      </button>
-    </div>
+      </GuildSlot>
+    </nav>
   );
 }

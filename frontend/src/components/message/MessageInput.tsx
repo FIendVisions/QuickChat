@@ -121,17 +121,17 @@ export function MessageInput({
   return (
     <div className="w-full space-y-1.5">
       {replyTo && (
-        <div className="flex items-start gap-2 rounded-md border border-border-color bg-bg-secondary/80 px-2 py-1.5 text-xs">
-          <span className="min-w-0 flex-1 text-text-muted">
-            <span className="font-medium text-primary">回复</span>{' '}
-            <span className="text-text-normal">@{replyTo.username}</span>
+        <div className="flex items-start gap-2 rounded-lg border border-black/20 bg-dc-channels px-3 py-2 text-xs">
+          <span className="min-w-0 flex-1 text-dc-channel-text">
+            <span className="font-semibold text-primary">回复</span>{' '}
+            <span className="text-dc-channel-text-active">@{replyTo.username}</span>
             <span className="block truncate opacity-80">
               {replyRefSnippetPlain(messageToReplyRef(replyTo))}
             </span>
           </span>
           <button
             type="button"
-            className="shrink-0 rounded p-0.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+            className="shrink-0 rounded p-0.5 text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active"
             title="取消回复"
             onClick={() => onCancelReply?.()}
           >
@@ -139,7 +139,10 @@ export function MessageInput({
           </button>
         </div>
       )}
-      <form onSubmit={handleSubmit} className="flex items-end gap-1.5">
+      <form
+        onSubmit={handleSubmit}
+        className="flex items-end gap-1 rounded-lg bg-dc-input px-1 py-1"
+      >
         <input
           ref={imageInputRef}
           type="file"
@@ -157,7 +160,7 @@ export function MessageInput({
 
         <button
           type="button"
-          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal disabled:opacity-40"
+          className="shrink-0 rounded-md p-2 text-dc-channel-text hover:bg-black/20 hover:text-dc-channel-text-active disabled:opacity-40"
           title="发送图片"
           disabled={busy}
           onClick={() => imageInputRef.current?.click()}
@@ -166,7 +169,7 @@ export function MessageInput({
         </button>
         <button
           type="button"
-          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal disabled:opacity-40"
+          className="shrink-0 rounded-md p-2 text-dc-channel-text hover:bg-black/20 hover:text-dc-channel-text-active disabled:opacity-40"
           title="发送文件"
           disabled={busy}
           onClick={() => fileInputRef.current?.click()}
@@ -176,7 +179,7 @@ export function MessageInput({
 
         <button
           type="button"
-          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal"
+          className="shrink-0 rounded-md p-2 text-dc-channel-text hover:bg-black/20 hover:text-dc-channel-text-active"
           title="表情"
         >
           <Smile size={20} />
@@ -189,7 +192,7 @@ export function MessageInput({
             onKeyDown={handleKeyDown}
             placeholder={isUploading ? '上传中…' : '输入消息…'}
             rows={1}
-            className="max-h-32 w-full resize-none rounded-md bg-bg-tertiary px-3 py-2 text-sm text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+            className="max-h-32 w-full resize-none bg-transparent px-2 py-2.5 text-[15px] leading-5 text-dc-channel-text-active placeholder:text-dc-channel-text focus:outline-none"
             disabled={busy}
           />
         </div>
@@ -197,7 +200,7 @@ export function MessageInput({
         <button
           type="submit"
           disabled={!message.trim() || busy}
-          className="shrink-0 rounded p-2 text-primary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+          className="shrink-0 rounded-md p-2 text-dc-channel-text hover:bg-black/20 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
           title="发送文字"
         >
           <Send size={20} />

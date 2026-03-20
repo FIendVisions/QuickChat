@@ -113,7 +113,7 @@ export function VoiceChannelMain({
 
         {showChat && (
           <div
-            className={`relative flex min-h-0 max-h-[45vh] flex-col border-t border-border-color ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
+            className={`relative flex min-h-0 max-h-[45vh] flex-col border-t border-black/20 bg-dc-chat ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
             onDragEnter={onDragEnter}
             onDragLeave={onDragLeave}
             onDragOverCapture={onDragOverCapture}
@@ -138,7 +138,7 @@ export function VoiceChannelMain({
                 onEveryonePinsRefresh={onEveryonePinsRefresh}
               />
             </div>
-            <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">
+            <div className="shrink-0 border-t border-black/20 bg-dc-chat px-4 py-3">
               <MessageInput
                 channelId={channel.id}
                 currentUserId={user.id}

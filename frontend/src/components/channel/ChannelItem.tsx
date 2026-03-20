@@ -1,115 +1,161 @@
-// frontend/src/components/channel/ChannelItem.tsx
-
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Hash, Lock, Users, Copy, Check, Mic, Video } from 'lucide-react';
+import { Hash, Lock, Users, Copy, Check, Mic, MessagesSquare, Pencil, Plus } from 'lucide-react';
 import { Channel, ChannelType, ChannelKind } from '@/types/channel.types';
 
 interface ChannelItemProps {
   channel: Channel;
   onClick?: (channel: Channel) => void;
   showTypeBadge?: boolean;
-  /** Discord 侧栏深色样式 */
   dark?: boolean;
+  selected?: boolean;
+  canEdit?: boolean;
+  onEdit?: (channel: Channel) => void;
+  /** 在此频道所属分组下新建频道（与编辑按钮并列的 +） */
+  onAddChannelInGroup?: (channel: Channel) => void;
 }
 
-export function ChannelItem({ channel, onClick, showTypeBadge, dark }: ChannelItemProps) {
+export function ChannelItem({
+  channel,
+  onClick,
+  showTypeBadge,
+  dark,
+  selected,
+  canEdit,
+  onEdit,
+  onAddChannelInGroup,
+}: ChannelItemProps) {
   const [copied, setCopied] = useState(false);
   const isPrivate = channel.type === ChannelType.PRIVATE;
-  const isOfficial = channel.id === 'public-official';
   const kind = channel.kind ?? ChannelKind.TEXT;
 
   const handleClick = useCallback(() => {
     onClick?.(channel);
   }, [channel, onClick]);
 
-  const handleCopy = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(channel.id);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
-  }, [channel]);
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(channel.id);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
+    },
+    [channel],
+  );
 
-  const rowHover = dark ? 'hover:bg-white/10' : 'hover:bg-bg-hover';
-  const nameClass = dark
-    ? 'truncate text-sm text-white/85 group-hover:text-white'
-    : 'truncate text-sm text-text-normal group-hover:text-white';
+  const handleEdit = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onEdit?.(channel);
+    },
+    [channel, onEdit],
+  );
+
+  const handleAdd = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onAddChannelInGroup?.(channel);
+    },
+    [channel, onAddChannelInGroup],
+  );
+
+  const rowBase = dark
+    ? selected
+      ? 'bg-dc-channel-active text-dc-channel-text-active'
+      : 'text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active'
+    : selected
+      ? 'bg-bg-active text-text-normal'
+      : 'text-text-normal hover:bg-bg-hover';
+
+  const iconMuted = dark
+    ? selected
+      ? 'text-dc-channel-text-active'
+      : 'text-dc-channel-text'
+    : 'text-text-muted';
 
   const KindIcon =
     kind === ChannelKind.VOICE ? (
-      <Mic size={14} className={dark ? 'text-amber-300' : 'text-amber-500'} />
-    ) : kind === ChannelKind.LIVE ? (
-      <Video size={14} className={dark ? 'text-rose-300' : 'text-rose-500'} />
+      <Mic size={18} className={`shrink-0 ${iconMuted}`} strokeWidth={2} />
+    ) : kind === ChannelKind.FORUM ? (
+      <MessagesSquare size={18} className={`shrink-0 ${iconMuted}`} strokeWidth={2} />
     ) : isPrivate ? (
-      <Lock size={14} className={dark ? 'text-violet-300' : 'text-primary'} />
+      <Lock size={16} className={`shrink-0 ${iconMuted}`} strokeWidth={2} />
     ) : (
-      <Hash size={14} className={dark ? 'text-emerald-300' : 'text-success'} />
+      <Hash size={18} className={`shrink-0 ${iconMuted}`} strokeWidth={2} />
     );
 
   return (
     <div
       onClick={handleClick}
-      className={`group relative flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-all duration-150 ${rowHover}`}
+      className={`group relative mx-2 flex cursor-pointer items-center gap-1.5 rounded-[4px] px-2 py-1.5 transition-colors duration-100 ${rowBase}`}
     >
-      <div className="flex-shrink-0">{KindIcon}</div>
+      {KindIcon}
 
-      {/* 名称 + 徽标 */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className={nameClass}>
-            {channel.name}
-          </span>
-          {isOfficial && (
-            <span className="flex-shrink-0 rounded bg-yellow-500/20 px-1 py-0.5 text-[10px] text-yellow-500 leading-none">
-              官方
-            </span>
-          )}
-          {showTypeBadge && !isOfficial && (
+          <span className="truncate text-[15px] font-medium leading-5">{channel.name}</span>
+          {showTypeBadge && (
             <span
-              className={`flex-shrink-0 rounded px-1 py-0.5 text-[10px] leading-none ${
-                isPrivate
-                  ? dark
-                    ? 'bg-violet-500/25 text-violet-200'
-                    : 'bg-primary/20 text-primary'
-                  : dark
-                    ? 'bg-emerald-500/20 text-emerald-200'
-                    : 'bg-success/20 text-success'
+              className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-medium leading-none ${
+                isPrivate ? 'bg-primary/25 text-primary' : 'bg-[#23a559]/20 text-[#23a559]'
               }`}
             >
               {isPrivate ? '私密' : '公开'}
             </span>
           )}
-          {channel.hasPassword && (
-            <Lock size={10} className="flex-shrink-0 text-text-muted" />
-          )}
+          {channel.hasPassword && <Lock size={10} className="shrink-0 opacity-60" />}
         </div>
       </div>
 
-      {/* 人数 */}
       <div
-        className={`flex flex-shrink-0 items-center gap-0.5 text-[10px] ${dark ? 'text-white/40' : 'text-text-muted'}`}
+        className={`flex shrink-0 items-center gap-0.5 text-[11px] tabular-nums ${
+          dark ? (selected ? 'text-dc-channel-text' : 'text-dc-channel-text/70') : 'text-text-muted'
+        }`}
       >
-        <Users size={10} />
+        <Users size={11} />
         <span>{channel.participantCount ?? 0}</span>
       </div>
 
-      {/* 复制ID（hover时显示） */}
-      {!isOfficial && (
+      {canEdit && onEdit && (
         <button
-          onClick={handleCopy}
-          className={`flex-shrink-0 rounded p-0.5 opacity-0 transition-all group-hover:opacity-100 ${
-            dark ? 'text-white/45 hover:text-white' : 'text-text-muted hover:text-primary'
+          type="button"
+          onClick={handleEdit}
+          title="重命名"
+          className={`shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
+            dark ? 'text-dc-channel-text hover:text-dc-channel-text-active' : 'text-text-muted hover:text-primary'
           }`}
-          title={copied ? '已复制' : '复制频道ID'}
         >
-          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <Pencil size={14} />
         </button>
       )}
+
+      {onAddChannelInGroup && (
+        <button
+          type="button"
+          onClick={handleAdd}
+          title="在此分组下新建频道"
+          className={`shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
+            dark ? 'text-dc-channel-text hover:text-dc-channel-text-active' : 'text-text-muted hover:text-primary'
+          }`}
+        >
+          <Plus size={14} strokeWidth={2.5} />
+        </button>
+      )}
+
+      <button
+        onClick={handleCopy}
+        className={`shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 ${
+          dark ? 'text-dc-channel-text hover:text-dc-channel-text-active' : 'text-text-muted hover:text-primary'
+        }`}
+        title={copied ? '已复制' : '复制频道 ID'}
+      >
+        {copied ? <Check size={14} /> : <Copy size={14} />}
+      </button>
     </div>
   );
 }

@@ -55,8 +55,9 @@ export const channelApi = {
   async create(data: {
     name: string;
     type: 'PUBLIC' | 'PRIVATE';
-    kind?: 'TEXT' | 'VOICE' | 'LIVE';
+    kind?: 'TEXT' | 'VOICE' | 'FORUM';
     serverId?: string;
+    categoryId?: string;
     description?: string;
     password?: string;
     userId: string;
@@ -85,7 +86,17 @@ export const channelApi = {
     return handleResponse(response);
   },
 
-  async update(id: string, data: { name?: string; description?: string; password?: string; type?: string }): Promise<Channel> {
+  async update(
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      password?: string;
+      type?: string;
+      kind?: 'TEXT' | 'VOICE' | 'FORUM';
+      categoryId?: string | null;
+    },
+  ): Promise<Channel> {
     const userId = localStorage.getItem('userId') || '';
     const response = await fetch(`${getApiOrigin()}/channels/${id}`, {
       method: 'PATCH',

@@ -12,6 +12,7 @@ import { ChannelKind } from '@/types/channel.types';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
 import type { EveryonePin } from '@/types/pin.types';
 import { VoiceChannelMain } from './VoiceChannelMain';
+import { ForumChannelMain } from './ForumChannelMain';
 
 export interface ChatMainStackProps {
   channel: Channel;
@@ -74,30 +75,31 @@ export function ChatMainStack({
 
   const kind = channel.kind ?? ChannelKind.TEXT;
   const channelMark =
-    kind === ChannelKind.VOICE ? '🔊' : kind === ChannelKind.LIVE ? '📡' : channel.type === 'PUBLIC' ? '#' : '🔒';
+    kind === ChannelKind.VOICE ? '🔊' : kind === ChannelKind.FORUM ? '📋' : channel.type === 'PUBLIC' ? '#' : '🔒';
 
   const titleBar = (
-    <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color bg-bg-tertiary px-4 shadow-sm">
+    <div className="flex h-12 shrink-0 items-center justify-between border-b border-black/20 bg-dc-chat px-4 shadow-dc-header">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="text-base text-text-muted">{channelMark}</span>
-        <h2 className="truncate text-sm font-semibold text-text-normal">{channel.name}</h2>
-        {kind === ChannelKind.LIVE && !liveActive && (
-          <span className="shrink-0 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-400">
-            直播频道
+        <span className="text-xl leading-none text-dc-channel-text">{channelMark}</span>
+        <h2 className="truncate text-base font-semibold text-dc-channel-text-active">{channel.name}</h2>
+        {kind === ChannelKind.FORUM && (
+          <span className="shrink-0 rounded bg-[#5865f2]/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#949cf7]">
+            论坛
           </span>
         )}
         {liveActive && (
-          <span className="shrink-0 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+          <span className="shrink-0 rounded bg-[#f23f43]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#f23f43]">
             直播中
           </span>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="flex shrink-0 items-center gap-0.5">
         {isOwner && !isOfficialChannel && (
           <button
             type="button"
             onClick={onOpenSettings}
-            className="rounded p-1.5 text-sm text-text-muted hover:bg-bg-hover hover:text-text-normal"
+            className="rounded p-2 text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active"
+            title="频道设置"
           >
             ⚙️
           </button>
@@ -106,9 +108,9 @@ export function ChatMainStack({
           <button
             type="button"
             onClick={onLeaveChannel}
-            className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-hover hover:text-text-normal"
+            className="rounded px-3 py-1.5 text-sm font-medium text-dc-channel-text hover:bg-dc-channel-hover hover:text-dc-channel-text-active"
           >
-            🚪 退出
+            退出频道
           </button>
         )}
       </div>
@@ -155,6 +157,19 @@ export function ChatMainStack({
     );
   }
 
+  if (kind === ChannelKind.FORUM) {
+    return (
+      <ForumChannelMain
+        channel={channel}
+        user={user}
+        isOwner={isOwner}
+        isOfficialChannel={isOfficialChannel}
+        onLeaveChannel={onLeaveChannel}
+        onOpenSettings={onOpenSettings}
+      />
+    );
+  }
+
   if (kind === ChannelKind.VOICE) {
     return (
       <>
@@ -189,7 +204,7 @@ export function ChatMainStack({
       {titleBar}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
-          className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
+          className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-dc-chat ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
           onDragEnter={onDragEnter}
           onDragLeave={onDragLeave}
           onDragOverCapture={onDragOverCapture}
@@ -214,7 +229,7 @@ export function ChatMainStack({
               onEveryonePinsRefresh={onEveryonePinsRefresh}
             />
           </div>
-          <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">
+          <div className="shrink-0 border-t border-black/20 bg-dc-chat px-4 py-3">
             <MessageInput
               channelId={channel.id}
               currentUserId={user.id}

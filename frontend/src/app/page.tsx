@@ -1,22 +1,20 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
-import { TopBar } from '@/components/layout/TopBar';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { UserSelfPanel } from '@/components/layout/UserSelfPanel';
 import { ServerRail } from '@/components/server/ServerRail';
-import { ServerChannelSidebar } from '@/components/channel/ServerChannelSidebar';
+import { ServerChannelSidebar, type HomeSidebarView } from '@/components/channel/ServerChannelSidebar';
 import { CreateServerModal } from '@/components/server/CreateServerModal';
 import { JoinServerModal } from '@/components/server/JoinServerModal';
 import { useServers } from '@/hooks/useServers';
 import { MessageListRef } from '@/components/message/MessageList';
 import { ChannelSettingsModal } from '@/components/channel/ChannelSettingsModal';
-import { PublicChannelBrowser } from '@/components/channel/PublicChannelBrowser';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { LiveWatchProvider } from '@/contexts/LiveWatchContext';
 import { ChatMainStack } from '@/components/chat/ChatMainStack';
-import { Channel, ChannelKind } from '@/types/channel.types';
+import { Channel } from '@/types/channel.types';
 import { serverApi } from '@/services/api/server.api';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
@@ -37,7 +35,7 @@ export default function HomePage() {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showCreateServerModal, setShowCreateServerModal] = useState(false);
   const [showJoinServerModal, setShowJoinServerModal] = useState(false);
-  const [browsingPublicChannels, setBrowsingPublicChannels] = useState(false);
+  const [homeMainView, setHomeMainView] = useState<HomeSidebarView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { servers, refetch: refetchServers } = useServers(user?.id);
 
@@ -48,7 +46,7 @@ export default function HomePage() {
   const [personalPinIds, setPersonalPinIds] = useState<string[]>([]);
   const [everyonePins, setEveryonePins] = useState<EveryonePin[]>([]);
 
-  const isOfficialChannel = selectedChannel?.id === 'public-official';
+  const isOfficialChannel = false;
   const isOwner = selectedChannel?.ownerId === user?.id;
 
   const selectedServer = selectedServerId
@@ -259,19 +257,9 @@ export default function HomePage() {
       if (savedToken && savedUserId && savedUsername) {
         setUser({ id: savedUserId, username: savedUsername });
         setToken(savedToken);
-        setSelectedChannel({
-          id: 'public-official',
-          name: '公共频道',
-          type: 'PUBLIC' as any,
-          kind: ChannelKind.TEXT,
-          description: '官方频道 - 所有用户自动加入',
-          ownerId: 'system',
-          participantCount: 0,
-          hasPassword: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
+        setSelectedChannel(null);
         setSelectedServerId(null);
+        setHomeMainView(null);
       }
     } catch (err) {
       console.error('Failed to load auth state:', err);
@@ -290,13 +278,9 @@ export default function HomePage() {
 
       setUser({ id: u.id, username: u.username, email: u.email });
       setToken(access_token);
-      setSelectedChannel({
-        id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
-        kind: ChannelKind.TEXT,
-        description: '官方频道', ownerId: 'system', participantCount: 0,
-        hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
+      setSelectedChannel(null);
       setSelectedServerId(null);
+      setHomeMainView(null);
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -315,13 +299,9 @@ export default function HomePage() {
 
       setUser({ id: u.id, username: u.username, email: u.email });
       setToken(access_token);
-      setSelectedChannel({
-        id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
-        kind: ChannelKind.TEXT,
-        description: '官方频道', ownerId: 'system', participantCount: 0,
-        hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      });
+      setSelectedChannel(null);
       setSelectedServerId(null);
+      setHomeMainView(null);
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -339,17 +319,12 @@ export default function HomePage() {
     setToken(null);
     setSelectedChannel(null);
     setSelectedServerId(null);
-    setBrowsingPublicChannels(false);
+    setHomeMainView(null);
     setError(null);
   };
 
   const handleChannelSelect = async (channel: Channel) => {
-    setBrowsingPublicChannels(false);
-    if (channel.id === 'public-official') {
-      setSelectedServerId(null);
-      setSelectedChannel(channel);
-      return;
-    }
+    setHomeMainView(null);
     if (channel.serverId) {
       setSelectedServerId(channel.serverId);
     } else {
@@ -364,7 +339,7 @@ export default function HomePage() {
   };
 
   const handleLeaveChannel = async () => {
-    if (!selectedChannel || selectedChannel.id === 'public-official') return;
+    if (!selectedChannel) return;
     try {
       await channelApi.leave(selectedChannel.id);
     } catch (err) {
@@ -449,12 +424,7 @@ export default function HomePage() {
   return (
     <WebSocketProvider userId={user.id} token={token || undefined}>
       <LiveWatchProvider>
-      <div className="flex h-screen flex-col bg-bg-primary">
-        <TopBar
-          username={user.username}
-          onLogout={handleLogout}
-        />
-
+      <div className="flex h-screen flex-col bg-dc-chat">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <ServerRail
             servers={servers}
@@ -462,27 +432,29 @@ export default function HomePage() {
             homeSelected={selectedServerId === null}
             onSelectHome={() => {
               setSelectedServerId(null);
-              setBrowsingPublicChannels(false);
+              setSelectedChannel(null);
             }}
             onSelectServer={(s) => {
               setSelectedServerId(s.id);
-              setBrowsingPublicChannels(false);
+              setHomeMainView(null);
               setSelectedChannel(null);
             }}
             onAddServer={() => setShowCreateServerModal(true)}
             onJoinServer={() => setShowJoinServerModal(true)}
           />
 
-          <div className="flex w-[240px] min-h-0 min-w-0 shrink-0 flex-col border-r border-black/30">
+          <div className="flex w-[240px] min-h-0 min-w-0 shrink-0 flex-col border-r border-black/20 bg-dc-channels">
             <div className="min-h-0 flex-1 overflow-hidden">
               <ServerChannelSidebar
                 userId={user.id}
                 server={selectedServer}
-                onChannelSelect={handleChannelSelect}
-                onBrowsePublic={() => {
-                  setBrowsingPublicChannels(true);
+                selectedChannelId={selectedChannel?.id}
+                homeView={homeMainView}
+                onHomeNavigate={(view) => {
+                  setHomeMainView(view);
                   setSelectedChannel(null);
                 }}
+                onChannelSelect={handleChannelSelect}
               />
             </div>
             <UserSelfPanel
@@ -490,17 +462,13 @@ export default function HomePage() {
               email={user.email}
               channelId={selectedChannel?.id ?? null}
               userId={user.id}
+              onLogout={handleLogout}
             />
           </div>
 
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-dc-chat">
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {browsingPublicChannels ? (
-                <PublicChannelBrowser
-                  userId={user.id}
-                  onChannelSelect={handleChannelSelect}
-                />
-              ) : selectedChannel ? (
+              {selectedChannel ? (
                 <ChatMainStack
                   channel={selectedChannel}
                   user={user}
@@ -532,11 +500,35 @@ export default function HomePage() {
                   onLeaveChannel={handleLeaveChannel}
                   onOpenSettings={() => setShowSettings(true)}
                 />
+              ) : selectedServerId ? (
+                <div className="flex flex-1 flex-col items-center justify-center bg-dc-chat px-6 text-center">
+                  <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-dc-channels text-4xl">
+                    #
+                  </div>
+                  <p className="mb-1 text-2xl font-bold text-dc-channel-text-active">选择一个频道</p>
+                  <p className="max-w-sm text-[15px] leading-relaxed text-dc-channel-text">
+                    在左侧选择文字、语音或论坛频道，开始与服务器成员交流。
+                  </p>
+                </div>
               ) : (
-                <div className="flex flex-1 flex-col items-center justify-center text-center">
-                  <div className="mb-4 text-5xl">💬</div>
-                  <p className="mb-2 text-lg text-text-normal">选择一个频道开始聊天</p>
-                  <p className="text-sm text-text-muted">从左侧列表中选择频道</p>
+                <div className="flex flex-1 flex-col items-center justify-center bg-dc-chat px-6 text-center">
+                  <div className="mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-dc-channels text-4xl">
+                    {homeMainView === 'dms' ? '✉️' : homeMainView === 'requests' ? '🔔' : homeMainView === 'friends' ? '👥' : '🏠'}
+                  </div>
+                  <p className="mb-1 text-2xl font-bold text-dc-channel-text-active">
+                    {!homeMainView
+                      ? '个人主页'
+                      : homeMainView === 'friends'
+                        ? '好友'
+                        : homeMainView === 'requests'
+                          ? '消息请求'
+                          : '私信'}
+                  </p>
+                  <p className="max-w-sm text-[15px] leading-relaxed text-dc-channel-text">
+                    {!homeMainView
+                      ? '在左侧栏选择好友、消息请求或私信。'
+                      : '此区域将用于好友列表、好友请求与私信会话，当前为占位界面。'}
+                  </p>
                 </div>
               )}
             </div>

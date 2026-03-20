@@ -61,37 +61,34 @@ export function PublicChannelBrowser({ userId, onChannelSelect }: PublicChannelB
 
   if (isLoading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-text-muted animate-pulse">加载公开频道...</div>
+      <div className="flex flex-1 items-center justify-center bg-dc-chat">
+        <div className="animate-pulse text-dc-channel-text">加载公开频道...</div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* 头部 */}
-      <div className="border-b border-border-color bg-bg-tertiary px-6 py-4">
-        <div className="flex items-center gap-3 mb-3">
-          <Globe size={24} className="text-success" />
+    <div className="flex flex-1 flex-col bg-dc-chat">
+      <div className="border-b border-black/20 bg-dc-chat px-6 py-4 shadow-dc-header">
+        <div className="mb-3 flex items-center gap-3">
+          <Globe size={24} className="text-[#23a559]" />
           <div>
-            <h2 className="text-lg font-bold text-text-normal">公开频道</h2>
-            <p className="text-xs text-text-muted">浏览所有公开频道，点击加入开始聊天</p>
+            <h2 className="text-lg font-bold text-dc-channel-text-active">公开频道</h2>
+            <p className="text-xs text-dc-channel-text">浏览全站公开频道，点击加入开始聊天</p>
           </div>
         </div>
-        {/* 搜索 */}
         <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-dc-channel-text" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="搜索频道..."
-            className="w-full pl-9 pr-3 py-2 bg-bg-primary border border-border-color rounded-lg text-sm text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+            className="w-full rounded-lg border border-black/20 bg-dc-input py-2 pl-9 pr-3 text-sm text-dc-channel-text-active placeholder:text-dc-channel-text focus:outline-none focus:ring-2 focus:ring-primary"
           />
         </div>
       </div>
 
-      {/* 频道列表 */}
       <div className="flex-1 overflow-y-auto p-6">
         {error && (
           <div className="mb-4 p-3 bg-danger/10 border border-danger/50 rounded-lg text-sm text-danger">
@@ -101,9 +98,9 @@ export function PublicChannelBrowser({ userId, onChannelSelect }: PublicChannelB
         )}
 
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-text-muted">
+          <div className="flex flex-col items-center justify-center py-16 text-dc-channel-text">
             <Globe size={48} className="mb-4 opacity-30" />
-            <p className="text-lg mb-1">
+            <p className="mb-1 text-lg text-dc-channel-text-active">
               {search ? '没有找到匹配的频道' : '暂无公开频道'}
             </p>
             <p className="text-sm">
@@ -141,24 +138,24 @@ function ChannelCard({ channel, onJoin, isJoining }: {
   isJoining: boolean;
 }) {
   return (
-    <div className="bg-bg-secondary border border-border-color rounded-xl p-4 hover:border-primary/50 transition-all group">
+    <div className="rounded-xl border border-black/20 bg-dc-channels p-4 transition-all hover:border-primary/40 group">
       <div className="flex items-start gap-3 mb-3">
-        <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center flex-shrink-0">
-          <Hash size={20} className="text-success" />
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-[#23a559]/15">
+          <Hash size={20} className="text-[#23a559]" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-text-normal truncate">{channel.name}</h3>
-            {channel.hasPassword && <Lock size={12} className="text-text-muted flex-shrink-0" />}
+            <h3 className="truncate font-semibold text-dc-channel-text-active">{channel.name}</h3>
+            {channel.hasPassword && <Lock size={12} className="flex-shrink-0 text-dc-channel-text" />}
           </div>
-          <p className="text-xs text-text-muted mt-0.5 line-clamp-2">
+          <p className="mt-0.5 line-clamp-2 text-xs text-dc-channel-text">
             {channel.description || '暂无描述'}
           </p>
         </div>
       </div>
 
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 text-xs text-text-muted">
+        <div className="flex items-center gap-3 text-xs text-dc-channel-text">
           <span className="flex items-center gap-1">
             <Users size={12} />
             {channel.participantCount || 0} 成员

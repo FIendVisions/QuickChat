@@ -6,8 +6,9 @@ import { ChannelType, ChannelKind } from '../../../common/types';
 /**
  * 频道详细信息（包含参与人数）
  */
-export interface ChannelDetail extends Channel {
+export interface ChannelDetail extends Omit<Channel, 'password'> {
   participantCount: number;
+  hasPassword: boolean;
   owner?: {
     id: string;
     username: string;
@@ -24,6 +25,8 @@ export interface ChannelListItem {
   type: ChannelType;
   kind: ChannelKind;
   serverId?: string | null;
+  categoryId?: string | null;
+  category?: { id: string; name: string; position: number } | null;
   description?: string;
   ownerId: string;
   owner: {

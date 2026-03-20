@@ -30,6 +30,9 @@ model User {
   serverMemberships   ServerMember[]
   messages            Message[]
   channelPinsCreated  ChannelPin[]     @relation("ChannelPinAuthor")
+  forumPosts          ForumPost[]      @relation("ForumPostAuthor")
+  forumComments       ForumPostComment[]
+  forumLikes          ForumPostLike[]
 
   @@map("users")
   @@index([status])
@@ -48,12 +51,29 @@ model Server {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  owner    User           @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members  ServerMember[]
-  channels Channel[]
+  owner             User              @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members           ServerMember[]
+  channels          Channel[]
+  channelCategories ChannelCategory[]
 
   @@index([ownerId])
   @@map("servers")
+}
+
+// 频道分组（可自定义名称，类似 Discord 分类）
+model ChannelCategory {
+  id        String   @id @default(uuid())
+  serverId  String
+  name      String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  server   Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  channels Channel[]
+
+  @@index([serverId])
+  @@map("channel_categories")
 }
 
 model ServerMember {
@@ -80,26 +100,30 @@ model Channel {
   id              String        @id @default(uuid())
   name            String
   type            String
-  // kind: TEXT | VOICE | LIVE
+  // kind: TEXT | VOICE | FORUM（VOICE 含原语音+直播能力）
   kind            String        @default("TEXT")
   ownerId         String
   serverId        String?
+  categoryId      String?
   description     String?
   maxParticipants Int?
   password        String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  owner    User            @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  server   Server?         @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  members  ChannelMember[]
-  messages Message[]
-  pins     ChannelPin[]
+  owner    User             @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  server   Server?          @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  category ChannelCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  members    ChannelMember[]
+  messages   Message[]
+  pins       ChannelPin[]
+  forumPosts ForumPost[]
 
   @@index([type])
   @@index([ownerId])
   @@index([serverId])
   @@index([kind])
+  @@index([categoryId])
   @@map("channels")
 }
 
@@ -174,4 +198,55 @@ model ChannelPin {
   @@unique([channelId, messageId])
   @@index([channelId])
   @@map("channel_pins")
+}
+
+// ============================================================
+// 论坛频道：帖子 / 评论 / 点赞
+// ============================================================
+
+model ForumPost {
+  id        String   @id @default(uuid())
+  channelId String
+  authorId  String
+  title     String
+  content   String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  channel  Channel            @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author   User               @relation("ForumPostAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  comments ForumPostComment[]
+  likes    ForumPostLike[]
+
+  @@index([channelId, createdAt(sort: Desc)])
+  @@map("forum_posts")
+}
+
+model ForumPostComment {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@map("forum_post_comments")
+}
+
+model ForumPostLike {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([postId])
+  @@map("forum_post_likes")
 }

@@ -8,11 +8,17 @@ export enum ChannelType {
   PRIVATE = 'PRIVATE',
 }
 
-/** 频道形态：文字 / 语音 / 直播 */
+/** 频道形态：文字 / 语音（含原直播能力）/ 论坛 */
 export enum ChannelKind {
   TEXT = 'TEXT',
   VOICE = 'VOICE',
-  LIVE = 'LIVE',
+  FORUM = 'FORUM',
+}
+
+export interface ChannelCategoryRef {
+  id: string;
+  name: string;
+  position: number;
 }
 
 /**
@@ -24,6 +30,8 @@ export interface Channel {
   type: ChannelType;
   kind?: ChannelKind;
   serverId?: string | null;
+  categoryId?: string | null;
+  category?: ChannelCategoryRef | null;
   description?: string;
   ownerId: string;
   owner?: {
@@ -33,8 +41,8 @@ export interface Channel {
   maxParticipants?: number;
   participantCount?: number;
   hasPassword?: boolean;
-  requiresApproval?: boolean; // 是否需要审核
-  inviteCode?: string; // 频道邀请码
+  requiresApproval?: boolean;
+  inviteCode?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -62,6 +70,7 @@ export interface CreateChannelRequest {
   type: ChannelType;
   kind?: ChannelKind;
   serverId?: string;
+  categoryId?: string;
   description?: string;
   password?: string;
   requiresApproval: boolean;

@@ -21,6 +21,7 @@ import { JoinChannelDto } from './dto/join-channel.dto';
 import { QueryChannelDto } from './dto/query-channel.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ChannelDetail, ChannelListItem, ChannelMemberInfo, JoinChannelResponse } from './interfaces/channel-response.interface';
+import { ServersService } from '../servers/servers.service';
 
 /**
  * 频道服务
@@ -36,6 +37,7 @@ export class ChannelsService {
     private readonly websocketGateway: WebsocketGateway,
     private readonly sequenceGenerator: SequenceGeneratorService,
     private readonly messageAck: MessageAckService,
+    private readonly serversService: ServersService,
   ) {}
 
   /**
@@ -49,6 +51,9 @@ export class ChannelsService {
     const channelInclude = {
       owner: {
         select: { id: true, username: true, avatar: true },
+      },
+      category: {
+        select: { id: true, name: true, position: true },
       },
       _count: {
         select: { members: true },
@@ -67,6 +72,7 @@ export class ChannelsService {
       if (!serverMember) {
         return { channels: [], total: 0 };
       }
+      await this.serversService.ensureCategoriesForServer(serverId);
       where = { serverId };
       if (type) {
         where.type = type;
@@ -112,24 +118,45 @@ export class ChannelsService {
       this.prisma.channel.count({ where }),
     ]);
 
-    const channelList: ChannelListItem[] = channels.map((channel) => ({
-      id: channel.id,
-      name: channel.name,
-      type: channel.type as ChannelType,
-      kind: (channel.kind || ChannelKind.TEXT) as ChannelKind,
-      serverId: channel.serverId,
-      description: channel.description,
-      ownerId: channel.ownerId,
-      owner: {
-        id: channel.owner.id,
-        username: channel.owner.username,
-      },
-      maxParticipants: channel.maxParticipants,
-      participantCount: channel._count.members,
-      hasPassword: !!channel.password,
-      createdAt: channel.createdAt,
-      updatedAt: channel.updatedAt,
-    }));
+    const normalizeKind = (k: string): ChannelKind => {
+      if (k === 'LIVE') return ChannelKind.VOICE;
+      const v = (k || ChannelKind.TEXT) as ChannelKind;
+      return Object.values(ChannelKind).includes(v) ? v : ChannelKind.TEXT;
+    };
+
+    const channelList: ChannelListItem[] = channels
+      .map((channel) => ({
+        id: channel.id,
+        name: channel.name,
+        type: channel.type as ChannelType,
+        kind: normalizeKind(channel.kind),
+        serverId: channel.serverId,
+        categoryId: channel.categoryId,
+        category: channel.category
+          ? {
+              id: channel.category.id,
+              name: channel.category.name,
+              position: channel.category.position,
+            }
+          : null,
+        description: channel.description,
+        ownerId: channel.ownerId,
+        owner: {
+          id: channel.owner.id,
+          username: channel.owner.username,
+        },
+        maxParticipants: channel.maxParticipants,
+        participantCount: channel._count.members,
+        hasPassword: !!channel.password,
+        createdAt: channel.createdAt,
+        updatedAt: channel.updatedAt,
+      }))
+      .sort((a, b) => {
+        const pa = a.category?.position ?? 999;
+        const pb = b.category?.position ?? 999;
+        if (pa !== pb) return pa - pb;
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      });
 
     this.logger.log(`Found ${total} channels (userId filter: ${userId || 'none'}, serverId: ${serverId || 'none'})`);
     return { channels: channelList, total };
@@ -149,6 +176,7 @@ export class ChannelsService {
             avatar: true,
           },
         },
+        category: { select: { id: true, name: true, position: true } },
         _count: {
           select: {
             members: true,
@@ -162,8 +190,12 @@ export class ChannelsService {
     }
 
     const { password, _count, ...rest } = channel;
+    let kind = (rest.kind || ChannelKind.TEXT) as string;
+    if (kind === 'LIVE') kind = ChannelKind.VOICE;
+    if (!Object.values(ChannelKind).includes(kind as ChannelKind)) kind = ChannelKind.TEXT;
     return {
       ...rest,
+      kind,
       participantCount: _count.members,
       hasPassword: !!password,
     };
@@ -176,18 +208,38 @@ export class ChannelsService {
     // 确保创建者在数据库中存在
     await this.ensureUserExists(userId, dto.username);
 
-    const kind = dto.kind ?? ChannelKind.TEXT;
+    let kind = dto.kind ?? ChannelKind.TEXT;
+    if ((kind as string) === 'LIVE') kind = ChannelKind.VOICE;
     if (!Object.values(ChannelKind).includes(kind)) {
       throw new BadRequestException('Invalid channel kind');
     }
 
     let serverId: string | null = dto.serverId ?? null;
+    let categoryId: string | null = dto.categoryId ?? null;
+
     if (serverId) {
       const sm = await this.prisma.serverMember.findUnique({
         where: { serverId_userId: { serverId, userId } },
       });
       if (!sm) {
         throw new ForbiddenException('You are not a member of this server');
+      }
+      await this.serversService.ensureCategoriesForServer(serverId);
+      const cats = await this.prisma.channelCategory.findMany({
+        where: { serverId },
+        orderBy: { position: 'asc' },
+      });
+      if (!categoryId && cats.length > 0) {
+        const idx = kind === ChannelKind.VOICE ? 1 : kind === ChannelKind.FORUM ? 2 : 0;
+        categoryId = cats[idx]?.id ?? cats[0].id;
+      }
+      if (categoryId) {
+        const catOk = await this.prisma.channelCategory.findFirst({
+          where: { id: categoryId, serverId },
+        });
+        if (!catOk) {
+          throw new BadRequestException('Invalid category for this server');
+        }
       }
     }
 
@@ -204,6 +256,7 @@ export class ChannelsService {
         type: dto.type,
         kind,
         serverId,
+        categoryId,
         ownerId: userId,
         description: dto.description,
         maxParticipants: dto.type === ChannelType.PRIVATE ? (dto.maxParticipants || 50) : null,
@@ -211,6 +264,7 @@ export class ChannelsService {
       },
       include: {
         owner: { select: { id: true, username: true, avatar: true } },
+        category: { select: { id: true, name: true, position: true } },
         _count: { select: { members: true } },
       },
     });
@@ -219,30 +273,42 @@ export class ChannelsService {
 
     this.logger.log(`Created ${dto.type} channel: ${channel.id} by user ${userId}`);
 
-    this.websocketGateway.broadcast('channel:created', {
-      ...channel,
+    const { password, _count, ...createdRest } = channel;
+    const createdPayload = {
+      ...createdRest,
       participantCount: 1,
-    });
+      hasPassword: !!password,
+    };
 
-    return { ...channel, participantCount: 1 };
+    this.websocketGateway.broadcast('channel:created', createdPayload);
+
+    return createdPayload;
   }
 
   /**
    * 更新频道
    */
   async update(userId: string, channelId: string, dto: UpdateChannelDto): Promise<ChannelDetail> {
-    // 验证频道所有权
     const channel = await this.prisma.channel.findUnique({
       where: { id: channelId },
-      select: { ownerId: true, type: true },
+      select: { ownerId: true, type: true, serverId: true },
     });
 
     if (!channel) {
       throw new NotFoundException('Channel not found');
     }
 
-    if (channel.ownerId !== userId) {
-      throw new ForbiddenException('You are not the owner of this channel');
+    let serverOwner = false;
+    if (channel.serverId) {
+      const s = await this.prisma.server.findUnique({
+        where: { id: channel.serverId },
+        select: { ownerId: true },
+      });
+      serverOwner = s?.ownerId === userId;
+    }
+
+    if (channel.ownerId !== userId && !serverOwner) {
+      throw new ForbiddenException('You cannot edit this channel');
     }
 
     const updateData: any = {};
@@ -260,8 +326,28 @@ export class ChannelsService {
         updateData.password = null;
       }
     }
+    if (dto.kind !== undefined) {
+      let k = dto.kind;
+      if ((k as string) === 'LIVE') k = ChannelKind.VOICE;
+      if (!Object.values(ChannelKind).includes(k)) {
+        throw new BadRequestException('Invalid channel kind');
+      }
+      updateData.kind = k;
+    }
+    if (dto.categoryId !== undefined) {
+      if (dto.categoryId === null || dto.categoryId === '') {
+        updateData.categoryId = null;
+      } else if (channel.serverId) {
+        const cat = await this.prisma.channelCategory.findFirst({
+          where: { id: dto.categoryId, serverId: channel.serverId },
+        });
+        if (!cat) {
+          throw new BadRequestException('Invalid category for this server');
+        }
+        updateData.categoryId = dto.categoryId;
+      }
+    }
 
-    // 更新频道
     const updatedChannel = await this.prisma.channel.update({
       where: { id: channelId },
       data: updateData,
@@ -273,6 +359,7 @@ export class ChannelsService {
             avatar: true,
           },
         },
+        category: { select: { id: true, name: true, position: true } },
         _count: {
           select: {
             members: true,
@@ -282,9 +369,14 @@ export class ChannelsService {
     });
 
     this.logger.log(`Updated channel: ${channelId} by user ${userId}`);
+    const { password, _count, ...rest } = updatedChannel;
+    let kind = (rest.kind || ChannelKind.TEXT) as string;
+    if (kind === 'LIVE') kind = ChannelKind.VOICE;
     return {
-      ...updatedChannel,
-      participantCount: updatedChannel._count.members,
+      ...rest,
+      kind,
+      participantCount: _count.members,
+      hasPassword: !!password,
     };
   }
 
@@ -292,18 +384,26 @@ export class ChannelsService {
    * 删除频道
    */
   async remove(userId: string, channelId: string): Promise<void> {
-    // 验证频道所有权
     const channel = await this.prisma.channel.findUnique({
       where: { id: channelId },
-      select: { ownerId: true },
+      select: { ownerId: true, serverId: true },
     });
 
     if (!channel) {
       throw new NotFoundException('Channel not found');
     }
 
-    if (channel.ownerId !== userId) {
-      throw new ForbiddenException('You are not the owner of this channel');
+    let serverOwner = false;
+    if (channel.serverId) {
+      const s = await this.prisma.server.findUnique({
+        where: { id: channel.serverId },
+        select: { ownerId: true },
+      });
+      serverOwner = s?.ownerId === userId;
+    }
+
+    if (channel.ownerId !== userId && !serverOwner) {
+      throw new ForbiddenException('You cannot delete this channel');
     }
 
     // 删除频道（级联删除成员和消息）
@@ -389,16 +489,14 @@ export class ChannelsService {
       timestamp: new Date().toISOString(),
     });
 
-    const chKind = (channel.kind || ChannelKind.TEXT) as ChannelKind;
+    let chKind = (channel.kind || ChannelKind.TEXT) as string;
+    if (chKind === 'LIVE') chKind = ChannelKind.VOICE;
     return {
       success: true,
       channelId: channel.id,
       channelName: channel.name,
       isPrivate: channel.type === ChannelType.PRIVATE,
-      canSpeak:
-        chKind === ChannelKind.VOICE ||
-        chKind === ChannelKind.LIVE ||
-        channel.type === ChannelType.PRIVATE,
+      canSpeak: chKind === ChannelKind.VOICE || channel.type === ChannelType.PRIVATE,
       participantCount: channel._count.members + 1,
     };
   }

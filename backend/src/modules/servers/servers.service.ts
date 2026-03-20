@@ -64,6 +64,13 @@ export class ServersService {
             members: {
               create: { userId, role: ServerMemberRole.OWNER },
             },
+            channelCategories: {
+              create: [
+                { name: '文字频道', position: 0 },
+                { name: '语音频道', position: 1 },
+                { name: '论坛', position: 2 },
+              ],
+            },
           },
           include: {
             owner: { select: { id: true, username: true, avatar: true } },
@@ -225,5 +232,108 @@ export class ServersService {
 
     await this.prisma.server.delete({ where: { id: serverId } });
     this.logger.log(`Server ${serverId} deleted by ${userId}`);
+  }
+
+  private async assertServerMember(serverId: string, userId: string) {
+    const m = await this.prisma.serverMember.findUnique({
+      where: { serverId_userId: { serverId, userId } },
+    });
+    if (!m) throw new ForbiddenException('You are not a member of this server');
+  }
+
+  private async assertServerOwner(serverId: string, userId: string) {
+    const s = await this.prisma.server.findUnique({
+      where: { id: serverId },
+      select: { ownerId: true },
+    });
+    if (!s) throw new NotFoundException('Server not found');
+    if (s.ownerId !== userId) {
+      throw new ForbiddenException('只有群主可以管理频道分组');
+    }
+  }
+
+  /**
+   * 无分组时创建默认三类，并把无 categoryId 的频道按 kind 归入对应分组
+   */
+  async ensureCategoriesForServer(serverId: string): Promise<void> {
+    const count = await this.prisma.channelCategory.count({ where: { serverId } });
+    if (count > 0) return;
+
+    const defaults = ['文字频道', '语音频道', '论坛'];
+    await this.prisma.$transaction(
+      defaults.map((name, position) =>
+        this.prisma.channelCategory.create({
+          data: { serverId, name, position },
+        }),
+      ),
+    );
+
+    const cats = await this.prisma.channelCategory.findMany({
+      where: { serverId },
+      orderBy: { position: 'asc' },
+    });
+    const c0 = cats[0]?.id;
+    const c1 = cats[1]?.id;
+    const c2 = cats[2]?.id;
+    if (!c0) return;
+
+    const channels = await this.prisma.channel.findMany({
+      where: { serverId, categoryId: null },
+    });
+    for (const ch of channels) {
+      let cid = c0;
+      if (ch.kind === 'VOICE') cid = c1 || c0;
+      else if (ch.kind === 'FORUM') cid = c2 || c0;
+      await this.prisma.channel.update({
+        where: { id: ch.id },
+        data: { categoryId: cid },
+      });
+    }
+  }
+
+  async listCategories(serverId: string, userId: string) {
+    await this.assertServerMember(serverId, userId);
+    await this.ensureCategoriesForServer(serverId);
+    return this.prisma.channelCategory.findMany({
+      where: { serverId },
+      orderBy: { position: 'asc' },
+    });
+  }
+
+  async createCategory(serverId: string, userId: string, name: string) {
+    await this.assertServerOwner(serverId, userId);
+    const agg = await this.prisma.channelCategory.aggregate({
+      where: { serverId },
+      _max: { position: true },
+    });
+    const position = (agg._max.position ?? -1) + 1;
+    return this.prisma.channelCategory.create({
+      data: { serverId, name: name.trim(), position },
+    });
+  }
+
+  async updateCategory(serverId: string, categoryId: string, userId: string, name: string) {
+    await this.assertServerOwner(serverId, userId);
+    const cat = await this.prisma.channelCategory.findFirst({
+      where: { id: categoryId, serverId },
+    });
+    if (!cat) throw new NotFoundException('Category not found');
+    return this.prisma.channelCategory.update({
+      where: { id: categoryId },
+      data: { name: name.trim() },
+    });
+  }
+
+  async deleteCategory(serverId: string, categoryId: string, userId: string) {
+    await this.assertServerOwner(serverId, userId);
+    const cat = await this.prisma.channelCategory.findFirst({
+      where: { id: categoryId, serverId },
+    });
+    if (!cat) throw new NotFoundException('Category not found');
+    await this.prisma.channel.updateMany({
+      where: { categoryId },
+      data: { categoryId: null },
+    });
+    await this.prisma.channelCategory.delete({ where: { id: categoryId } });
   }
 }

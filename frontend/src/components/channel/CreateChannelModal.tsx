@@ -1,17 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { Globe, Lock, X, Eye, EyeOff, Hash, Mic, Video } from 'lucide-react';
+import { Globe, Lock, X, Eye, EyeOff, Hash, Mic, MessagesSquare } from 'lucide-react';
 
 interface CreateChannelModalProps {
   onClose: () => void;
-  /** 为 true 时表示必须在服务器上下文中创建（应传入 serverId） */
   requireServer?: boolean;
   serverId?: string;
+  /**
+   * 从哪个分组下的「+」打开：传入该分组 id，创建时自动归入该组。
+   * 不传或 `null` 表示未指定分组（由后端按形态归类，例如「未分组」入口）。
+   */
+  targetCategoryId?: string | null;
   onCreate: (data: {
     name: string;
     type: 'public' | 'private';
-    kind: 'TEXT' | 'VOICE' | 'LIVE';
+    kind: 'TEXT' | 'VOICE' | 'FORUM';
+    categoryId?: string;
     description?: string;
     password?: string;
   }) => Promise<void>;
@@ -22,9 +27,10 @@ export function CreateChannelModal({
   onCreate,
   requireServer,
   serverId,
+  targetCategoryId,
 }: CreateChannelModalProps) {
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'TEXT' | 'VOICE' | 'LIVE'>('TEXT');
+  const [kind, setKind] = useState<'TEXT' | 'VOICE' | 'FORUM'>('TEXT');
   const [type, setType] = useState<'public' | 'private'>('public');
   const [description, setDescription] = useState('');
   const [password, setPassword] = useState('');
@@ -61,6 +67,8 @@ export function CreateChannelModal({
         name: name.trim(),
         type,
         kind,
+        categoryId:
+          targetCategoryId != null && targetCategoryId !== '' ? targetCategoryId : undefined,
         description: description.trim() || undefined,
         password: usePassword ? password : undefined,
       });
@@ -119,16 +127,16 @@ export function CreateChannelModal({
               </button>
               <button
                 type="button"
-                onClick={() => setKind('LIVE')}
+                onClick={() => setKind('FORUM')}
                 className={`flex flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
-                  kind === 'LIVE'
+                  kind === 'FORUM'
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
                 }`}
                 disabled={isCreating}
               >
-                <Video size={20} />
-                <span className="text-xs font-medium">直播</span>
+                <MessagesSquare size={20} />
+                <span className="text-xs font-medium">论坛</span>
               </button>
             </div>
           </div>
@@ -164,7 +172,7 @@ export function CreateChannelModal({
                 <Globe size={24} />
                 <div className="text-center">
                   <div className="text-sm font-medium">公开</div>
-                  <div className="mt-0.5 text-[10px] opacity-70">可被全站发现（无服务器时）</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">服务器成员可见</div>
                 </div>
               </button>
 
@@ -181,7 +189,7 @@ export function CreateChannelModal({
                 <Lock size={24} />
                 <div className="text-center">
                   <div className="text-sm font-medium">私密</div>
-                  <div className="mt-0.5 text-[10px] opacity-70">需邀请或频道 ID</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">需邀请或权限</div>
                 </div>
               </button>
             </div>
@@ -239,15 +247,15 @@ export function CreateChannelModal({
             />
           </div>
 
-          <div className="rounded-md bg-bg-tertiary p-3 text-xs text-text-muted">
-            {requireServer ? (
-              <p>频道将创建在当前服务器内；服务器成员可见列表中的频道（需先加入服务器）。</p>
-            ) : type === 'public' ? (
-              <p>无服务器时，公开频道会出现在全站「公开频道」列表中。</p>
-            ) : (
-              <p>私密频道主要对你可见，他人需使用频道 ID 加入。</p>
-            )}
-          </div>
+          {requireServer && (
+            <div className="rounded-md bg-bg-tertiary p-3 text-xs text-text-muted">
+              <p>
+                {targetCategoryId != null && targetCategoryId !== ''
+                  ? '频道将创建在当前服务器内，并自动归入你点击创建入口所在的分组。'
+                  : '频道将创建在当前服务器内；未指定分组时由系统按频道形态归类。'}
+              </p>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-md border border-danger/50 bg-danger/10 p-3">

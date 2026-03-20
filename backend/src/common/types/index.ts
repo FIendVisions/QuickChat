@@ -19,11 +19,11 @@ export enum ChannelType {
   PRIVATE = 'PRIVATE',
 }
 
-/** 频道形态：文字 / 语音 / 直播 */
+/** 频道形态：文字 / 语音（含直播）/ 论坛 */
 export enum ChannelKind {
   TEXT = 'TEXT',
   VOICE = 'VOICE',
-  LIVE = 'LIVE',
+  FORUM = 'FORUM',
 }
 
 export enum ServerMemberRole {
