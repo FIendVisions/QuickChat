@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { StatusBar } from '@/components/layout/StatusBar';
+import { UserSelfPanel } from '@/components/layout/UserSelfPanel';
 import { ChannelList } from '@/components/channel/ChannelList';
 import { ChannelMembers } from '@/components/channel/ChannelMembers';
 import { MessageList, MessageListRef } from '@/components/message/MessageList';
@@ -380,17 +381,25 @@ export default function HomePage() {
           onLogout={handleLogout}
         />
 
-        <div className="flex flex-1 overflow-hidden">
-          {/* 左侧边栏 */}
-          <div className="w-60 bg-bg-secondary">
-            <ChannelList
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {/* 左侧边栏：频道列表 + 左下角用户信息 / 媒体控制 */}
+          <div className="flex w-60 min-h-0 min-w-0 flex-col border-r border-border-color bg-bg-secondary">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ChannelList
+                userId={user.id}
+                token={token || undefined}
+                onChannelSelect={handleChannelSelect}
+                onBrowsePublicChannels={() => {
+                  setBrowsingPublicChannels(true);
+                  setSelectedChannel(null);
+                }}
+              />
+            </div>
+            <UserSelfPanel
+              username={user.username}
+              email={user.email}
+              channelId={selectedChannel?.id ?? null}
               userId={user.id}
-              token={token || undefined}
-              onChannelSelect={handleChannelSelect}
-              onBrowsePublicChannels={() => {
-                setBrowsingPublicChannels(true);
-                setSelectedChannel(null);
-              }}
             />
           </div>
 

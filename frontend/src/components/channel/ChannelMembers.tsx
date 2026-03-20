@@ -4,8 +4,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Crown, Shield, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { Crown, Shield, PanelRightClose, PanelRightOpen, Monitor, Video } from 'lucide-react';
 import { useWebSocket } from '@/contexts/WebSocketContext';
+import { LiveWatchModal } from '@/components/live/LiveWatchModal';
 
 interface MemberInfo {
   userId: string;
@@ -24,11 +25,50 @@ interface ChannelMembersProps {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-function MemberRow({ member }: { member: MemberInfo }) {
+interface MemberMedia {
+  screen: boolean;
+  camera: boolean;
+}
+
+function MemberRow({
+  member,
+  media,
+  isSelf,
+  onWatchLive,
+}: {
+  member: MemberInfo;
+  media?: MemberMedia;
+  isSelf: boolean;
+  onWatchLive?: () => void;
+}) {
+  const live = !!(media && (media.screen || media.camera));
+  const canWatch = live && !isSelf;
+
   return (
     <div
-      className="group flex h-8 cursor-default items-center gap-2 rounded px-2 hover:bg-white/[0.06]"
-      title={`${member.username}\nID: ${member.userId}`}
+      role={canWatch ? 'button' : undefined}
+      tabIndex={canWatch ? 0 : undefined}
+      onClick={canWatch ? onWatchLive : undefined}
+      onKeyDown={
+        canWatch
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onWatchLive?.();
+              }
+            }
+          : undefined
+      }
+      className={`group flex h-8 items-center gap-2 rounded px-2 ${
+        canWatch
+          ? 'cursor-pointer hover:bg-primary/15 focus:outline-none focus:ring-1 focus:ring-primary'
+          : 'cursor-default hover:bg-white/[0.06]'
+      }`}
+      title={
+        canWatch
+          ? `${member.username} 正在直播 · 点击查看`
+          : `${member.username}\nID: ${member.userId}`
+      }
     >
       <div className="relative h-8 w-8 shrink-0">
         {member.avatar ? (
@@ -59,6 +99,16 @@ function MemberRow({ member }: { member: MemberInfo }) {
           {member.role === 'ADMIN' && (
             <Shield size={12} className="shrink-0 text-primary" aria-hidden />
           )}
+          {media?.screen && (
+            <span className="shrink-0 text-success" title="屏幕共享中">
+              <Monitor size={12} aria-hidden />
+            </span>
+          )}
+          {media?.camera && (
+            <span className="shrink-0 text-primary" title="摄像头开启">
+              <Video size={12} aria-hidden />
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -75,11 +125,18 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }: ChannelMembersProps) {
+export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isOwner }: ChannelMembersProps) {
   const { socket } = useWebSocket();
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [mediaByUser, setMediaByUser] = useState<Record<string, MemberMedia>>({});
+  const [watchTarget, setWatchTarget] = useState<{
+    userId: string;
+    username: string;
+    screen: boolean;
+    camera: boolean;
+  } | null>(null);
 
   const loadMembers = useCallback(async () => {
     setLoading(true);
@@ -101,6 +158,37 @@ export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }
   }, [loadMembers]);
 
   useEffect(() => {
+    setMediaByUser({});
+  }, [channelId]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const onMedia = (p: {
+      channelId: string;
+      userId: string;
+      screen?: boolean;
+      camera?: boolean;
+    }) => {
+      if (p.channelId !== channelId) return;
+      setMediaByUser((prev) => {
+        const next = { ...prev };
+        if (!p.screen && !p.camera) {
+          delete next[p.userId];
+        } else {
+          next[p.userId] = { screen: !!p.screen, camera: !!p.camera };
+        }
+        return next;
+      });
+    };
+
+    socket.on('channel:media:state', onMedia);
+    return () => {
+      socket.off('channel:media:state', onMedia);
+    };
+  }, [socket, channelId]);
+
+  useEffect(() => {
     const t = setInterval(() => loadMembers(), 12000);
     return () => clearInterval(t);
   }, [loadMembers]);
@@ -118,7 +206,14 @@ export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }
       if (p?.userId) setOnline(p.userId, true);
     };
     const onOffline = (p: { userId?: string }) => {
-      if (p?.userId) setOnline(p.userId, false);
+      if (p?.userId) {
+        setOnline(p.userId, false);
+        setMediaByUser((prev) => {
+          const next = { ...prev };
+          delete next[p.userId!];
+          return next;
+        });
+      }
     };
     const onStatus = (p: { userId?: string; status?: string }) => {
       if (p?.userId) setOnline(p.userId, p.status !== 'OFFLINE');
@@ -187,7 +282,20 @@ export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }
                 <SectionLabel>在线 — {online.length}</SectionLabel>
                 <div className="space-y-0.5 px-1 pb-1">
                   {online.map((m) => (
-                    <MemberRow key={m.userId} member={m} />
+                    <MemberRow
+                      key={m.userId}
+                      member={m}
+                      media={mediaByUser[m.userId]}
+                      isSelf={m.userId === currentUserId}
+                      onWatchLive={() =>
+                        setWatchTarget({
+                          userId: m.userId,
+                          username: m.username,
+                          screen: !!mediaByUser[m.userId]?.screen,
+                          camera: !!mediaByUser[m.userId]?.camera,
+                        })
+                      }
+                    />
                   ))}
                 </div>
               </>
@@ -197,7 +305,20 @@ export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }
                 <SectionLabel>离线 — {offline.length}</SectionLabel>
                 <div className="space-y-0.5 px-1 pb-2">
                   {offline.map((m) => (
-                    <MemberRow key={m.userId} member={m} />
+                    <MemberRow
+                      key={m.userId}
+                      member={m}
+                      media={mediaByUser[m.userId]}
+                      isSelf={m.userId === currentUserId}
+                      onWatchLive={() =>
+                        setWatchTarget({
+                          userId: m.userId,
+                          username: m.username,
+                          screen: !!mediaByUser[m.userId]?.screen,
+                          camera: !!mediaByUser[m.userId]?.camera,
+                        })
+                      }
+                    />
                   ))}
                 </div>
               </>
@@ -208,6 +329,18 @@ export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }
           </>
         )}
       </div>
+
+      {watchTarget && (
+        <LiveWatchModal
+          socket={socket}
+          channelId={channelId}
+          broadcasterUserId={watchTarget.userId}
+          broadcasterName={watchTarget.username}
+          hasScreen={watchTarget.screen}
+          hasCamera={watchTarget.camera}
+          onClose={() => setWatchTarget(null)}
+        />
+      )}
     </aside>
   );
 }

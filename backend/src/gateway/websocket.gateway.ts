@@ -117,6 +117,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
   }
 
+  /** 该用户的任一线程是否已加入频道房间 */
+  private isUserInChannelRoom(userId: string, channelId: string): boolean {
+    const roomName = `channel:${channelId}`;
+    const room = this.server.sockets.adapter.rooms.get(roomName);
+    if (!room || room.size === 0) return false;
+    const sids = this.getUserConnections(userId);
+    return sids.some((sid) => room.has(sid));
+  }
+
   // ========== 频道相关 ==========
 
   @SubscribeMessage('join:channel')
@@ -196,5 +205,113 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
 
     return { event: 'status_updated', data: { userId, status } };
+  }
+
+  // ========== 直播：屏幕 / 摄像头状态 + WebRTC 信令转发 ==========
+
+  @SubscribeMessage('channel:media:state')
+  handleChannelMediaState(
+    client: Socket,
+    payload: {
+      channelId: string;
+      userId: string;
+      username?: string;
+      screen: boolean;
+      camera: boolean;
+    },
+  ) {
+    const socketUserId = client.handshake.query.userId as string;
+    if (!socketUserId || socketUserId !== payload.userId) {
+      return { ok: false, error: 'forbidden' };
+    }
+    const roomName = `channel:${payload.channelId}`;
+    if (!client.rooms.has(roomName)) {
+      return { ok: false, error: 'not_in_channel' };
+    }
+
+    this.server.to(roomName).emit('channel:media:state', {
+      channelId: payload.channelId,
+      userId: payload.userId,
+      username: payload.username || '用户',
+      screen: !!payload.screen,
+      camera: !!payload.camera,
+      ts: Date.now(),
+    });
+    return { ok: true };
+  }
+
+  @SubscribeMessage('webrtc:watch-request')
+  handleWebrtcWatchRequest(client: Socket, payload: { channelId: string; targetUserId: string }) {
+    const fromUserId = client.handshake.query.userId as string;
+    const { channelId, targetUserId } = payload;
+    if (!fromUserId || !targetUserId || fromUserId === targetUserId) {
+      return { ok: false, error: 'bad_request' };
+    }
+    const roomName = `channel:${channelId}`;
+    if (!client.rooms.has(roomName)) {
+      return { ok: false, error: 'not_in_channel' };
+    }
+    if (!this.isUserInChannelRoom(targetUserId, channelId)) {
+      return { ok: false, error: 'target_not_in_channel' };
+    }
+
+    this.sendToUser(targetUserId, 'webrtc:watch-request', {
+      channelId,
+      fromUserId,
+    });
+    return { ok: true };
+  }
+
+  @SubscribeMessage('webrtc:watch-stop')
+  handleWebrtcWatchStop(client: Socket, payload: { channelId: string; targetUserId: string }) {
+    const fromUserId = client.handshake.query.userId as string;
+    const { channelId, targetUserId } = payload;
+    if (!fromUserId || !targetUserId) {
+      return { ok: false, error: 'bad_request' };
+    }
+    const roomName = `channel:${channelId}`;
+    if (!client.rooms.has(roomName)) {
+      return { ok: false, error: 'not_in_channel' };
+    }
+
+    this.sendToUser(targetUserId, 'webrtc:watch-stop', {
+      channelId,
+      fromUserId,
+    });
+    return { ok: true };
+  }
+
+  @SubscribeMessage('webrtc:signal')
+  handleWebrtcSignal(
+    client: Socket,
+    payload: {
+      channelId: string;
+      toUserId: string;
+      type: string;
+      sdp?: { type?: string; sdp?: string };
+      candidate?: Record<string, unknown>;
+    },
+  ) {
+    const fromUserId = client.handshake.query.userId as string;
+    const { channelId, toUserId, type, sdp, candidate } = payload;
+    if (!fromUserId || !toUserId || !type) {
+      return { ok: false, error: 'bad_request' };
+    }
+    const roomName = `channel:${channelId}`;
+    if (!client.rooms.has(roomName)) {
+      return { ok: false, error: 'not_in_channel' };
+    }
+    if (!this.isUserInChannelRoom(toUserId, channelId)) {
+      return { ok: false, error: 'peer_not_in_channel' };
+    }
+
+    this.sendToUser(toUserId, 'webrtc:signal', {
+      channelId,
+      fromUserId,
+      type,
+      sdp,
+      candidate,
+    });
+    return { ok: true };
   }
 }
