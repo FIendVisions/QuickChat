@@ -15,7 +15,8 @@ import { Channel } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
 import { resolveUploadUrl } from '@/lib/mediaUrl';
-import type { SendMessagePayload } from '@/types/message.types';
+import { loadChannelPins, toggleChannelPin } from '@/lib/pinnedMessages';
+import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
 
 export default function HomePage() {
   const [user, setUser] = useState<{ id: string; username: string; email?: string } | null>(null);
@@ -29,6 +30,8 @@ export default function HomePage() {
   const messageListRef = useRef<MessageListRef>(null);
   const chatDragDepth = useRef(0);
   const [chatDragOver, setChatDragOver] = useState(false);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
 
   const isOfficialChannel = selectedChannel?.id === 'public-official';
   const isOwner = selectedChannel?.ownerId === user?.id;
@@ -104,6 +107,34 @@ export default function HomePage() {
     [selectedChannel, user, token],
   );
 
+  const handleMessageSend = useCallback(
+    async (payload: SendMessagePayload) => {
+      await sendChannelPayload(payload);
+      setReplyTo(null);
+    },
+    [sendChannelPayload],
+  );
+
+  useEffect(() => {
+    if (selectedChannel?.id) {
+      setPinnedIds(loadChannelPins(selectedChannel.id));
+    } else {
+      setPinnedIds([]);
+    }
+  }, [selectedChannel?.id]);
+
+  useEffect(() => {
+    setReplyTo(null);
+  }, [selectedChannel?.id]);
+
+  const handleTogglePin = useCallback(
+    (messageId: string) => {
+      if (!selectedChannel) return;
+      setPinnedIds(toggleChannelPin(selectedChannel.id, messageId));
+    },
+    [selectedChannel],
+  );
+
   useEffect(() => {
     chatDragDepth.current = 0;
     setChatDragOver(false);
@@ -138,7 +169,7 @@ export default function HomePage() {
       try {
         const uploaded = await channelApi.uploadAttachment(selectedChannel.id, file);
         const isImage = !!uploaded.mimeType?.startsWith('image/');
-        await sendChannelPayload({
+        await handleMessageSend({
           content: '',
           type: isImage ? 'IMAGE' : 'FILE',
           attachmentUrl: uploaded.url,
@@ -150,7 +181,7 @@ export default function HomePage() {
         setError(msg);
       }
     },
-    [selectedChannel, user, sendChannelPayload],
+    [selectedChannel, user, handleMessageSend],
   );
 
   useEffect(() => {
@@ -393,6 +424,9 @@ export default function HomePage() {
                           ref={messageListRef}
                           channelId={selectedChannel.id}
                           userId={user.id}
+                          onReply={setReplyTo}
+                          pinnedIds={pinnedIds}
+                          onTogglePin={handleTogglePin}
                         />
                       </div>
                       <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">
@@ -400,7 +434,9 @@ export default function HomePage() {
                           channelId={selectedChannel.id}
                           currentUserId={user.id}
                           currentUsername={user.username}
-                          onSend={sendChannelPayload}
+                          replyTo={replyTo}
+                          onCancelReply={() => setReplyTo(null)}
+                          onSend={handleMessageSend}
                         />
                       </div>
                     </div>

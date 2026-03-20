@@ -3,15 +3,27 @@
 'use client';
 
 import { useState, useRef, FormEvent } from 'react';
-import { Send, Smile, Paperclip, ImageIcon } from 'lucide-react';
+import { Send, Smile, Paperclip, ImageIcon, X } from 'lucide-react';
 import { messageApi } from '@/services/api/message.api';
 import { channelApi } from '@/services/api/channel.api';
-import type { SendMessagePayload } from '@/types/message.types';
+import { messageToPlainText } from '@/lib/messagePlainText';
+import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
+
+function buildReplyPrefix(replyTo: ChatMessage): string {
+  const plain = messageToPlainText(replyTo);
+  const oneLine = plain.replace(/\n/g, ' ');
+  const snippet = oneLine.slice(0, 80);
+  const suffix = oneLine.length > 80 ? '…' : '';
+  return `「回复 @${replyTo.username}：${snippet}${suffix}」\n`;
+}
 
 interface MessageInputProps {
   channelId: string;
   currentUserId?: string;
   currentUsername?: string;
+  /** 右键「回复」选中的消息 */
+  replyTo?: ChatMessage | null;
+  onCancelReply?: () => void;
   onSend?: (payload: SendMessagePayload) => Promise<void>;
 }
 
@@ -19,6 +31,8 @@ export function MessageInput({
   channelId,
   currentUserId,
   currentUsername,
+  replyTo = null,
+  onCancelReply,
   onSend,
 }: MessageInputProps) {
   const [message, setMessage] = useState('');
@@ -27,21 +41,29 @@ export function MessageInput({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const withReplyContent = (content: string) =>
+    replyTo ? `${buildReplyPrefix(replyTo)}${content}` : content;
+
   const sendPayload = async (payload: SendMessagePayload) => {
     const userId = currentUserId || localStorage.getItem('userId') || 'anonymous';
     const username = currentUsername || localStorage.getItem('username') || '匿名用户';
 
+    const outgoing: SendMessagePayload = {
+      ...payload,
+      content: withReplyContent(payload.content ?? ''),
+    };
+
     if (onSend) {
-      await onSend(payload);
+      await onSend(outgoing);
       return;
     }
 
     await messageApi.send(channelId, userId, username, {
-      content: payload.content,
-      type: payload.type,
-      attachmentUrl: payload.attachmentUrl,
-      attachmentName: payload.attachmentName,
-      attachmentMime: payload.attachmentMime,
+      content: outgoing.content,
+      type: outgoing.type,
+      attachmentUrl: outgoing.attachmentUrl,
+      attachmentName: outgoing.attachmentName,
+      attachmentMime: outgoing.attachmentMime,
     });
   };
 
@@ -102,7 +124,24 @@ export function MessageInput({
   const busy = isSending || isUploading;
 
   return (
-    <div className="w-full">
+    <div className="w-full space-y-1.5">
+      {replyTo && (
+        <div className="flex items-start gap-2 rounded-md border border-border-color bg-bg-secondary/80 px-2 py-1.5 text-xs">
+          <span className="min-w-0 flex-1 text-text-muted">
+            <span className="font-medium text-primary">回复</span>{' '}
+            <span className="text-text-normal">@{replyTo.username}</span>
+            <span className="block truncate opacity-80">{messageToPlainText(replyTo)}</span>
+          </span>
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+            title="取消回复"
+            onClick={() => onCancelReply?.()}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="flex items-end gap-1.5">
         <input
           ref={imageInputRef}
