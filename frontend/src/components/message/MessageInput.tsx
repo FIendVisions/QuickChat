@@ -2,106 +2,167 @@
 
 'use client';
 
-import { useState, FormEvent } from 'react';
-import { Send, Smile } from 'lucide-react';
-import { sendNewMessage } from '@/lib/dbHelpers';
+import { useState, useRef, FormEvent } from 'react';
+import { Send, Smile, Paperclip, ImageIcon } from 'lucide-react';
 import { messageApi } from '@/services/api/message.api';
+import { channelApi } from '@/services/api/channel.api';
+import type { SendMessagePayload } from '@/types/message.types';
 
 interface MessageInputProps {
   channelId: string;
   currentUserId?: string;
   currentUsername?: string;
-  onSend?: (content: string) => void;
+  onSend?: (payload: SendMessagePayload) => Promise<void>;
 }
 
-/**
- * 消息输入框组件
- * 通过回调函数发送消息（由父组件处理实际发送逻辑）
- */
 export function MessageInput({
   channelId,
   currentUserId,
   currentUsername,
-  onSend
+  onSend,
 }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  /**
-   * 发送消息
-   */
+  const sendPayload = async (payload: SendMessagePayload) => {
+    const userId = currentUserId || localStorage.getItem('userId') || 'anonymous';
+    const username = currentUsername || localStorage.getItem('username') || '匿名用户';
+
+    if (onSend) {
+      await onSend(payload);
+      return;
+    }
+
+    await messageApi.send(channelId, userId, username, {
+      content: payload.content,
+      type: payload.type,
+      attachmentUrl: payload.attachmentUrl,
+      attachmentName: payload.attachmentName,
+      attachmentMime: payload.attachmentMime,
+    });
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-
     const content = message.trim();
-    if (!content || isSending) return;
+    if (!content || isSending || isUploading) return;
 
     setIsSending(true);
-
     try {
-      // 如果提供了 onSend 回调，使用它来发送消息
-      // 这样可以由父组件控制实际的发送逻辑（通过 useRealtimeMessages）
-      if (onSend) {
-        await onSend(content);
-      } else {
-        // 如果没有提供回调，直接使用 API（向后兼容）
-        const userId = currentUserId || localStorage.getItem('userId') || 'anonymous';
-        const username = currentUsername || localStorage.getItem('username') || '匿名用户';
-        await messageApi.send(channelId, content, userId, username);
-      }
-
-      // 清空输入框
+      await sendPayload({ content, type: 'TEXT' });
       setMessage('');
     } catch (error: any) {
       console.error('❌ 发送消息失败:', error);
-      alert(`发送消息失败: ${error.message || '未知错误'}`);
+      alert(`发送失败: ${error.message || '未知错误'}`);
     } finally {
       setIsSending(false);
     }
   };
 
-  /**
-   * 处理键盘快捷键
-   */
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Enter 发送，Shift+Enter 换行
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit(e);
     }
   };
 
+  const uploadAndSendFile = async (file: File, preferImage: boolean) => {
+    if (!file || isSending || isUploading) return;
+    setIsUploading(true);
+    try {
+      const uploaded = await channelApi.uploadAttachment(channelId, file);
+      const caption = message.trim();
+      const isImage =
+        uploaded.mimeType?.startsWith('image/') ?? preferImage;
+      await sendPayload({
+        content: caption,
+        type: isImage ? 'IMAGE' : 'FILE',
+        attachmentUrl: uploaded.url,
+        attachmentName: uploaded.filename,
+        attachmentMime: uploaded.mimeType,
+      });
+      setMessage('');
+    } catch (err: any) {
+      alert(err.message || '上传失败');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>, preferImage: boolean) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await uploadAndSendFile(file, preferImage);
+  };
+
+  const busy = isSending || isUploading;
+
   return (
-    <div className="p-4">
-      <form onSubmit={handleSubmit} className="flex items-end gap-2">
-        {/* 表情按钮（暂未实现） */}
+    <div className="w-full">
+      <form onSubmit={handleSubmit} className="flex items-end gap-1.5">
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => handleFileSelected(e, true)}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf,.doc,.docx,.txt,.zip,.xlsx,.xls"
+          className="hidden"
+          onChange={(e) => handleFileSelected(e, false)}
+        />
+
         <button
           type="button"
-          className="rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal transition-colors"
+          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal disabled:opacity-40"
+          title="发送图片"
+          disabled={busy}
+          onClick={() => imageInputRef.current?.click()}
+        >
+          <ImageIcon size={20} />
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal disabled:opacity-40"
+          title="发送文件"
+          disabled={busy}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <Paperclip size={20} />
+        </button>
+
+        <button
+          type="button"
+          className="shrink-0 rounded p-2 text-text-muted hover:bg-bg-tertiary hover:text-text-normal"
           title="表情"
         >
           <Smile size={20} />
         </button>
 
-        {/* 输入框 */}
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="发送消息... (Enter 发送, Shift+Enter 换行)"
+            placeholder={isUploading ? '上传中…' : '输入消息…'}
             rows={1}
-            className="w-full resize-none rounded-md bg-bg-tertiary px-3 py-2 text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
-            disabled={isSending}
+            className="max-h-32 w-full resize-none rounded-md bg-bg-tertiary px-3 py-2 text-sm text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+            disabled={busy}
           />
         </div>
 
-        {/* 发送按钮 */}
         <button
           type="submit"
-          disabled={!message.trim() || isSending}
-          className="rounded p-2 text-primary hover:bg-bg-tertiary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          title="发送"
+          disabled={!message.trim() || busy}
+          className="shrink-0 rounded p-2 text-primary hover:bg-bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+          title="发送文字"
         >
           <Send size={20} />
         </button>

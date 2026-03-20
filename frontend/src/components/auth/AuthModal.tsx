@@ -40,8 +40,8 @@ export function AuthModal({ onClose, onLogin, onRegister }: AuthModalProps) {
           throw new Error('两次输入的密码不一致');
         }
 
-        if (formData.password.length < 6) {
-          throw new Error('密码至少需要6个字符');
+        if (formData.password.length < 8) {
+          throw new Error('密码至少需要8个字符');
         }
 
         await onRegister(formData.username, formData.email, formData.password);

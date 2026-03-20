@@ -2,7 +2,7 @@
 
 'use client';
 
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 interface WebSocketContextType {
@@ -26,19 +26,19 @@ interface WebSocketProviderProps {
 }
 
 export function WebSocketProvider({ children, userId, token }: WebSocketProviderProps) {
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [connected, setConnected] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
     if (!userId) {
+      setSocket(null);
+      setConnected(false);
       return;
     }
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
 
-    console.log('🔌 创建全局 WebSocket 连接, URL:', wsUrl, 'User:', userId);
-
-    const socket = io(wsUrl, {
+    const s = io(wsUrl, {
       auth: { userId, token },
       query: { userId },
       transports: ['websocket', 'polling'],
@@ -47,31 +47,19 @@ export function WebSocketProvider({ children, userId, token }: WebSocketProvider
       reconnectionDelay: 1000,
     });
 
-    socket.on('connect', () => {
-      console.log('✅ Socket.IO 已连接, ID:', socket.id);
-      setConnected(true);
-    });
-
-    socket.on('disconnect', (reason) => {
-      console.log('❌ Socket.IO 断开:', reason);
-      setConnected(false);
-    });
-
-    socket.on('connect_error', (error) => {
-      console.error('❌ Socket.IO 连接错误:', error);
-    });
-
-    socketRef.current = socket;
+    s.on('connect', () => setConnected(true));
+    s.on('disconnect', () => setConnected(false));
+    setSocket(s);
 
     return () => {
-      console.log('🔌 断开全局 WebSocket 连接');
-      socket.disconnect();
-      socketRef.current = null;
+      s.disconnect();
+      setSocket(null);
+      setConnected(false);
     };
   }, [userId, token]);
 
   return (
-    <WebSocketContext.Provider value={{ socket: socketRef.current, connected }}>
+    <WebSocketContext.Provider value={{ socket, connected }}>
       {children}
     </WebSocketContext.Provider>
   );

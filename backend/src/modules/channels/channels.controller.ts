@@ -12,7 +12,15 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { diskStorage, type File as MulterFile } from 'multer';
+import { join } from 'path';
+import * as fs from 'fs';
+import { randomUUID } from 'crypto';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ChannelsService } from './channels.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -135,6 +143,61 @@ export class ChannelsController {
   @Get(':id/members')
   async getMembers(@Param('id') channelId: string) {
     return this.channelsService.getMembers(channelId);
+  }
+
+  /**
+   * 上传附件（图片/文档等），返回相对路径供发送消息时使用
+   * POST /channels/:id/upload  multipart field: file
+   */
+  @ApiOperation({ summary: '上传频道附件' })
+  @Post(':id/upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 15 * 1024 * 1024 },
+      storage: diskStorage({
+        destination: (_req, _file, cb) => {
+          const dir = join(process.cwd(), 'uploads');
+          if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+          cb(null, dir);
+        },
+        filename: (_req, file, cb) => {
+          const ext = file.originalname.includes('.')
+            ? file.originalname.slice(file.originalname.lastIndexOf('.')).slice(0, 24)
+            : '';
+          cb(null, `${randomUUID()}${ext}`);
+        },
+      }),
+      fileFilter: (_req, file, cb) => {
+        const m = file.mimetype || '';
+        const allowedDoc =
+          m === 'application/pdf' ||
+          m === 'text/plain' ||
+          m === 'application/msword' ||
+          m === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          m === 'application/vnd.ms-excel' ||
+          m === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+          m === 'application/zip' ||
+          m === 'application/x-zip-compressed';
+        if (m.startsWith('image/') || allowedDoc) cb(null, true);
+        else cb(null, false);
+      },
+    }),
+  )
+  async uploadAttachment(
+    @Param('id') channelId: string,
+    @UploadedFile() file?: MulterFile,
+  ) {
+    if (!file?.filename) {
+      throw new BadRequestException('请选择支持的文件（图片或常见文档）');
+    }
+    await this.channelsService.findOne(channelId);
+    return {
+      url: `/uploads/${file.filename}`,
+      filename: file.originalname,
+      mimeType: file.mimetype,
+      size: file.size,
+    };
   }
 
   /**

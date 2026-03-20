@@ -104,7 +104,7 @@ export function useRealtimeMessages({
       // 后端 ChannelsService.sendMessage() 会：
       // 1. 持久化到数据库
       // 2. 通过 WebsocketGateway.sendToChannel() 广播到房间
-      const message = await messageApi.send(channelId, content, userId, username);
+      const message = await messageApi.send(channelId, userId, username, { content });
 
       console.log('✅ 消息已发送并广播:', message);
       return message;

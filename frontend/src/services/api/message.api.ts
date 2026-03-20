@@ -34,19 +34,32 @@ async function handleResponse(response: Response): Promise<any> {
 
 export const messageApi = {
   /**
-   * 发送消息到频道
+   * 发送消息到频道（支持文本与附件元数据）
    */
-  async send(channelId: string, content: string, userId: string, username: string): Promise<any> {
-    console.log('📤 发送消息到频道:', channelId, '内容:', content);
-
+  async send(
+    channelId: string,
+    userId: string,
+    username: string,
+    payload: {
+      content: string;
+      type?: string;
+      attachmentUrl?: string;
+      attachmentName?: string;
+      attachmentMime?: string;
+    },
+  ): Promise<any> {
     try {
       const response = await fetch(`${API_URL}/channels/${channelId}/messages`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          content,
+          content: payload.content,
           userId,
           username,
+          type: payload.type,
+          attachmentUrl: payload.attachmentUrl,
+          attachmentName: payload.attachmentName,
+          attachmentMime: payload.attachmentMime,
         }),
       });
 
@@ -55,9 +68,7 @@ export const messageApi = {
         throw new Error(errorData.message || '发送消息失败');
       }
 
-      const message = await response.json();
-      console.log('✅ 消息发送成功:', message);
-      return message;
+      return await response.json();
     } catch (error) {
       console.error('❌ 发送消息失败:', error);
       throw error;

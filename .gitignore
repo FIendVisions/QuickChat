@@ -47,3 +47,7 @@ coverage/
 # Misc
 .pnp/
 .pnp.js
+
+# 用户上传的频道附件（保留目录）
+backend/uploads/*
+!backend/uploads/.gitkeep

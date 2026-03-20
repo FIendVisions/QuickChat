@@ -7,17 +7,10 @@ import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { messageApi } from '@/services/api/message.api';
 import { useWebSocket } from '@/contexts/WebSocketContext';
+import { resolveUploadUrl } from '@/lib/mediaUrl';
+import type { ChatMessage } from '@/types/message.types';
 
-interface Message {
-  id: string;
-  userId: string;
-  username: string;
-  avatar?: string;
-  content: string;
-  createdAt: string;
-  type: 'TEXT' | 'SYSTEM' | 'EMOJI';
-  channelId?: string;
-}
+type Message = ChatMessage;
 
 interface MessageListProps {
   channelId: string;
@@ -55,10 +48,16 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
         userId: msg.userId,
         username: msg.username || msg.user?.username || '未知用户',
         avatar: msg.avatar || msg.user?.avatar,
-        content: msg.content,
+        content: msg.content ?? '',
         createdAt: msg.createdAt,
         type: msg.type || 'TEXT',
         channelId: msg.channelId,
+        attachmentUrl:
+          msg.attachmentUrl != null && String(msg.attachmentUrl).length > 0
+            ? resolveUploadUrl(String(msg.attachmentUrl))
+            : undefined,
+        attachmentName: msg.attachmentName,
+        attachmentMime: msg.attachmentMime,
       }));
       setMessages(mapped);
     } catch (error) {
@@ -119,12 +118,28 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
       if (isLoadingRef.current) return;
       if (data.channelId !== channelId) return;
 
-      // 跳过自己发送的消息（发送端通过 replaceTemp 处理）
       if (data.userId === userId) return;
 
+      const normalized: Message = {
+        id: data.id,
+        channelId: data.channelId,
+        userId: data.userId,
+        username: data.username || '未知用户',
+        avatar: data.avatar,
+        content: data.content ?? '',
+        type: data.type || 'TEXT',
+        createdAt: data.createdAt,
+        attachmentUrl:
+          data.attachmentUrl != null && String(data.attachmentUrl).length > 0
+            ? resolveUploadUrl(String(data.attachmentUrl))
+            : undefined,
+        attachmentName: data.attachmentName,
+        attachmentMime: data.attachmentMime,
+      };
+
       setMessages((prev) => {
-        if (prev.some(m => m.id === data.id)) return prev;
-        return [...prev, data];
+        if (prev.some(m => m.id === normalized.id)) return prev;
+        return [...prev, normalized];
       });
     };
 
@@ -219,6 +234,9 @@ interface MessageItemProps {
 function MessageItem({ message, currentUserId }: MessageItemProps) {
   const isSystem = message.type === 'SYSTEM';
   const isCurrentUser = message.userId === currentUserId;
+  const isImage = message.type === 'IMAGE' || (message.attachmentMime?.startsWith('image/') && message.attachmentUrl);
+  const isFile = message.type === 'FILE' || (!!message.attachmentUrl && !isImage);
+  const caption = (message.content || '').trim();
 
   if (isSystem) {
     return (
@@ -267,12 +285,50 @@ function MessageItem({ message, currentUserId }: MessageItemProps) {
         </div>
 
         {/* 消息气泡 */}
-        <div className={`rounded-2xl px-3.5 py-2 shadow-sm ${
-          isCurrentUser
-            ? 'bg-success text-white rounded-br-sm'
-            : 'bg-bg-tertiary text-text-normal rounded-bl-sm'
-        }`}>
-          <p className="break-words text-sm leading-relaxed">{message.content}</p>
+        <div
+          className={`rounded-2xl px-2 py-1.5 shadow-sm ${
+            isCurrentUser
+              ? 'bg-success text-white rounded-br-sm'
+              : 'bg-bg-tertiary text-text-normal rounded-bl-sm'
+          }`}
+        >
+          {isImage && message.attachmentUrl && (
+            <a
+              href={message.attachmentUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="block"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={message.attachmentUrl}
+                alt={message.attachmentName || '图片'}
+                className="max-h-64 max-w-full rounded-lg object-contain"
+              />
+            </a>
+          )}
+          {isFile && message.attachmentUrl && (
+            <a
+              href={message.attachmentUrl}
+              target="_blank"
+              rel="noreferrer"
+              download={message.attachmentName}
+              className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-sm underline ${
+                isCurrentUser ? 'text-white/95 hover:text-white' : 'text-primary hover:text-primary/90'
+              }`}
+            >
+              <span>📎</span>
+              <span className="truncate">{message.attachmentName || '下载文件'}</span>
+            </a>
+          )}
+          {caption && (
+            <p className={`break-words text-sm leading-relaxed ${isImage || isFile ? 'mt-1.5' : ''}`}>
+              {caption}
+            </p>
+          )}
+          {!caption && !message.attachmentUrl && (
+            <p className="break-words text-sm leading-relaxed opacity-70">（空消息）</p>
+          )}
         </div>
       </div>
     </div>

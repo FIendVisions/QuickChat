@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { ChannelList } from '@/components/channel/ChannelList';
@@ -13,7 +13,9 @@ import { AuthModal } from '@/components/auth/AuthModal';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { Channel } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
-import { createUser, validateUser } from '@/lib/authStorage';
+import { authApi } from '@/services/api/auth.api';
+import { resolveUploadUrl } from '@/lib/mediaUrl';
+import type { SendMessagePayload } from '@/types/message.types';
 
 export default function HomePage() {
   const [user, setUser] = useState<{ id: string; username: string; email?: string } | null>(null);
@@ -25,9 +27,131 @@ export default function HomePage() {
   const [browsingPublicChannels, setBrowsingPublicChannels] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messageListRef = useRef<MessageListRef>(null);
+  const chatDragDepth = useRef(0);
+  const [chatDragOver, setChatDragOver] = useState(false);
 
   const isOfficialChannel = selectedChannel?.id === 'public-official';
   const isOwner = selectedChannel?.ownerId === user?.id;
+
+  const sendChannelPayload = useCallback(
+    async (payload: SendMessagePayload) => {
+      if (!selectedChannel || !user) return;
+
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      messageListRef.current?.addMessage({
+        id: tempId,
+        channelId: selectedChannel.id,
+        userId: user.id,
+        username: user.username,
+        content: payload.content,
+        type: (payload.type as any) || 'TEXT',
+        createdAt: new Date().toISOString(),
+        attachmentUrl: payload.attachmentUrl
+          ? resolveUploadUrl(payload.attachmentUrl)
+          : undefined,
+        attachmentName: payload.attachmentName,
+        attachmentMime: payload.attachmentMime,
+      });
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/channels/${selectedChannel.id}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          body: JSON.stringify({
+            content: payload.content,
+            userId: user.id,
+            username: user.username,
+            type: payload.type,
+            attachmentUrl: payload.attachmentUrl,
+            attachmentName: payload.attachmentName,
+            attachmentMime: payload.attachmentMime,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || '发送失败');
+      }
+
+      const result = await response.json();
+      const backendUserId = result.userId;
+      if (backendUserId && backendUserId !== user.id) {
+        localStorage.setItem('userId', backendUserId);
+        setUser((prev) => (prev ? { ...prev, id: backendUserId } : prev));
+      }
+
+      messageListRef.current?.replaceTemp(tempId, {
+        id: result.id,
+        channelId: result.channelId,
+        userId: backendUserId || user.id,
+        username: result.user?.username || user.username,
+        avatar: result.user?.avatar,
+        content: result.content ?? '',
+        type: result.type || 'TEXT',
+        createdAt: result.createdAt,
+        attachmentUrl: result.attachmentUrl
+          ? resolveUploadUrl(result.attachmentUrl)
+          : undefined,
+        attachmentName: result.attachmentName,
+        attachmentMime: result.attachmentMime,
+      });
+    },
+    [selectedChannel, user, token],
+  );
+
+  useEffect(() => {
+    chatDragDepth.current = 0;
+    setChatDragOver(false);
+  }, [selectedChannel?.id]);
+
+  const handleChatDragEnter = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.dataTransfer.types?.includes?.('Files')) return;
+    chatDragDepth.current += 1;
+    setChatDragOver(true);
+  }, []);
+
+  const handleChatDragLeave = useCallback((e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    chatDragDepth.current -= 1;
+    if (chatDragDepth.current <= 0) {
+      chatDragDepth.current = 0;
+      setChatDragOver(false);
+    }
+  }, []);
+
+  const handleChatDrop = useCallback(
+    async (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      chatDragDepth.current = 0;
+      setChatDragOver(false);
+      const file = e.dataTransfer.files?.[0];
+      if (!file || !selectedChannel || !user) return;
+      try {
+        const uploaded = await channelApi.uploadAttachment(selectedChannel.id, file);
+        const isImage = !!uploaded.mimeType?.startsWith('image/');
+        await sendChannelPayload({
+          content: '',
+          type: isImage ? 'IMAGE' : 'FILE',
+          attachmentUrl: uploaded.url,
+          attachmentName: uploaded.filename,
+          attachmentMime: uploaded.mimeType,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '上传失败';
+        setError(msg);
+      }
+    },
+    [selectedChannel, user, sendChannelPayload],
+  );
 
   useEffect(() => {
     try {
@@ -59,17 +183,14 @@ export default function HomePage() {
 
   const handleLogin = async (username: string, password: string) => {
     try {
-      const user = validateUser(username, password);
-      if (!user) throw new Error('用户名或密码错误');
+      const { access_token, user: u } = await authApi.login(username, password);
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('userId', u.id);
+      localStorage.setItem('username', u.username);
+      if (u.email) localStorage.setItem('email', u.email);
 
-      const token = `token-${user.id}-${Date.now()}`;
-      localStorage.setItem('token', token);
-      localStorage.setItem('userId', user.id);
-      localStorage.setItem('username', user.username);
-      localStorage.setItem('email', user.email);
-
-      setUser({ id: user.id, username: user.username, email: user.email });
-      setToken(token);
+      setUser({ id: u.id, username: u.username, email: u.email });
+      setToken(access_token);
       setSelectedChannel({
         id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
         description: '官方频道', ownerId: 'system', participantCount: 0,
@@ -85,15 +206,14 @@ export default function HomePage() {
 
   const handleRegister = async (username: string, email: string, password: string) => {
     try {
-      const newUser = createUser(username, email, password);
-      const token = `token-${newUser.id}-${Date.now()}`;
-      localStorage.setItem('token', token);
-      localStorage.setItem('userId', newUser.id);
-      localStorage.setItem('username', newUser.username);
-      localStorage.setItem('email', newUser.email);
+      const { access_token, user: u } = await authApi.register(username, email, password);
+      localStorage.setItem('token', access_token);
+      localStorage.setItem('userId', u.id);
+      localStorage.setItem('username', u.username);
+      if (u.email) localStorage.setItem('email', u.email);
 
-      setUser({ id: newUser.id, username: newUser.username, email: newUser.email });
-      setToken(token);
+      setUser({ id: u.id, username: u.username, email: u.email });
+      setToken(access_token);
       setSelectedChannel({
         id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
         description: '官方频道', ownerId: 'system', participantCount: 0,
@@ -208,8 +328,8 @@ export default function HomePage() {
           </div>
 
           {/* 中间+右侧区域 */}
-          <div className="flex flex-1 overflow-hidden">
-            <div className="flex flex-1 flex-col">
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col">
               {browsingPublicChannels ? (
                 <PublicChannelBrowser
                   userId={user.id}
@@ -217,17 +337,18 @@ export default function HomePage() {
                 />
               ) : selectedChannel ? (
                 <>
-                  {/* 频道标题栏 */}
-                  <div className="flex h-12 items-center justify-between border-b border-border-color bg-bg-tertiary px-4">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">
+                  {/* Discord 式：标题栏横跨消息区+成员区整宽 */}
+                  <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color bg-bg-tertiary px-4 shadow-sm">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-base text-text-muted">
                         {selectedChannel.type === 'PUBLIC' ? '#' : '🔒'}
                       </span>
-                      <h2 className="font-semibold text-text-normal">{selectedChannel.name}</h2>
+                      <h2 className="truncate text-sm font-semibold text-text-normal">{selectedChannel.name}</h2>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 items-center gap-1">
                       {isOwner && !isOfficialChannel && (
                         <button
+                          type="button"
                           onClick={() => setShowSettings(true)}
                           className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal text-sm"
                         >
@@ -236,8 +357,9 @@ export default function HomePage() {
                       )}
                       {!isOfficialChannel && (
                         <button
+                          type="button"
                           onClick={handleLeaveChannel}
-                          className="flex items-center gap-1 rounded px-3 py-1.5 text-sm text-text-muted hover:bg-bg-hover hover:text-text-normal"
+                          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-hover hover:text-text-normal"
                         >
                           🚪 退出
                         </button>
@@ -245,69 +367,48 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {/* 消息列表 */}
-                  <div className="flex-1 overflow-y-auto">
-                    <MessageList
-                      ref={messageListRef}
+                  {/* 消息区 + 成员区同高，输入框仅在左侧（Discord 布局） */}
+                  <div className="flex min-h-0 flex-1 overflow-hidden">
+                    <div
+                      className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
+                      onDragEnter={handleChatDragEnter}
+                      onDragLeave={handleChatDragLeave}
+                      onDragOverCapture={(e) => {
+                        e.preventDefault();
+                        if (e.dataTransfer.types?.includes?.('Files')) {
+                          e.dataTransfer.dropEffect = 'copy';
+                        }
+                      }}
+                      onDropCapture={(e) => {
+                        void handleChatDrop(e);
+                      }}
+                    >
+                      {chatDragOver && (
+                        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-primary/15 text-sm font-medium text-text-normal backdrop-blur-[1px]">
+                          松开鼠标发送文件
+                        </div>
+                      )}
+                      <div className="min-h-0 flex-1 overflow-y-auto">
+                        <MessageList
+                          ref={messageListRef}
+                          channelId={selectedChannel.id}
+                          userId={user.id}
+                        />
+                      </div>
+                      <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">
+                        <MessageInput
+                          channelId={selectedChannel.id}
+                          currentUserId={user.id}
+                          currentUsername={user.username}
+                          onSend={sendChannelPayload}
+                        />
+                      </div>
+                    </div>
+
+                    <ChannelMembers
                       channelId={selectedChannel.id}
                       userId={user.id}
-                    />
-                  </div>
-
-                  {/* 消息输入 */}
-                  <div className="border-t border-border-color bg-bg-tertiary p-4">
-                    <MessageInput
-                      channelId={selectedChannel.id}
-                      currentUserId={user.id}
-                      currentUsername={user.username}
-                      onSend={async (content) => {
-                        const tempId = `temp-${Date.now()}-${Math.random()}`;
-                        messageListRef.current?.addMessage({
-                          id: tempId,
-                          channelId: selectedChannel.id,
-                          userId: user.id,
-                          username: user.username,
-                          content,
-                          type: 'TEXT',
-                          createdAt: new Date().toISOString(),
-                        });
-
-                        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/channels/${selectedChannel.id}/messages`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            ...(token && { 'Authorization': `Bearer ${token}` }),
-                          },
-                          body: JSON.stringify({
-                            content,
-                            userId: user.id,
-                            username: user.username,
-                          }),
-                        });
-
-                        if (!response.ok) {
-                          const err = await response.json();
-                          throw new Error(err.message || '发送失败');
-                        }
-
-                        const result = await response.json();
-                        const backendUserId = result.userId;
-                        if (backendUserId && backendUserId !== user.id) {
-                          localStorage.setItem('userId', backendUserId);
-                          setUser(prev => prev ? { ...prev, id: backendUserId } : prev);
-                        }
-
-                        messageListRef.current?.replaceTemp(tempId, {
-                          id: result.id,
-                          channelId: result.channelId,
-                          userId: backendUserId || user.id,
-                          username: result.user?.username || user.username,
-                          avatar: result.user?.avatar,
-                          content: result.content,
-                          type: result.type || 'TEXT',
-                          createdAt: result.createdAt,
-                        });
-                      }}
+                      isOwner={isOwner}
                     />
                   </div>
                 </>
@@ -319,15 +420,6 @@ export default function HomePage() {
                 </div>
               )}
             </div>
-
-            {/* 右侧成员列表（嵌入聊天区内，紧凑宽度） */}
-            {selectedChannel && !browsingPublicChannels && (
-              <ChannelMembers
-                channelId={selectedChannel.id}
-                userId={user.id}
-                isOwner={isOwner}
-              />
-            )}
           </div>
         </div>
       </div>

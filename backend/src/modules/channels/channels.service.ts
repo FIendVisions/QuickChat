@@ -1,6 +1,13 @@
 // backend/src/modules/channels/channels.service.ts
 
-import { Injectable, NotFoundException, ForbiddenException, ConflictException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ConflictException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { Channel, ChannelMember, User } from '@prisma/client';
 import { ChannelType } from '../../common/types';
 import * as bcrypt from 'bcrypt';
@@ -411,7 +418,7 @@ export class ChannelsService {
       username: member.user.username,
       avatar: member.user.avatar,
       joinedAt: member.joinedAt,
-      isOnline: member.user.status !== 'OFFLINE',
+      isOnline: this.websocketGateway.isUserOnline(member.user.id),
       role: member.user.id === channel?.ownerId ? 'OWNER' : 'MEMBER',
     }));
   }
@@ -500,8 +507,10 @@ export class ChannelsService {
     // 确保用户在数据库中存在
     let dbUser = await this.prisma.user.findUnique({ where: { id: dto.userId } });
     if (!dbUser) {
-      // 按用户名查找（可能用户已存在但 ID 不同）
-      dbUser = await this.prisma.user.findUnique({ where: { username: dto.username } });
+      const nameKey = dto.username?.trim().toLowerCase();
+      if (nameKey) {
+        dbUser = await this.prisma.user.findUnique({ where: { username: nameKey } });
+      }
       if (dbUser) {
         dto.userId = dbUser.id;
       } else {
@@ -510,8 +519,8 @@ export class ChannelsService {
         dbUser = await this.prisma.user.create({
           data: {
             id: dto.userId,
-            username: dto.username,
-            status: 'ONLINE',
+            username: (dto.username || `user-${dto.userId.slice(0, 8)}`).trim().toLowerCase(),
+            status: 'OFFLINE',
           },
         });
       }
@@ -531,6 +540,23 @@ export class ChannelsService {
       });
     }
 
+    const content = (dto.content ?? '').trim();
+    const attachmentUrl = dto.attachmentUrl?.trim();
+    if (!content && !attachmentUrl) {
+      throw new BadRequestException('消息内容或附件至少填写一项');
+    }
+    if (attachmentUrl && !attachmentUrl.startsWith('/uploads/')) {
+      throw new BadRequestException('附件地址无效');
+    }
+
+    let msgType = dto.type || 'TEXT';
+    if (attachmentUrl) {
+      if (msgType === 'TEXT' || msgType === 'SYSTEM') {
+        const mime = dto.attachmentMime || '';
+        msgType = mime.startsWith('image/') ? 'IMAGE' : 'FILE';
+      }
+    }
+
     // 生成序列号
     const sequence = await this.sequenceGenerator.getNextSequence(channelId);
 
@@ -539,8 +565,11 @@ export class ChannelsService {
       data: {
         channelId,
         userId: dto.userId,
-        content: dto.content,
-        type: dto.type || 'TEXT',
+        content: content || '',
+        type: msgType,
+        attachmentUrl: attachmentUrl || null,
+        attachmentName: dto.attachmentName?.trim() || null,
+        attachmentMime: dto.attachmentMime?.trim() || null,
         sequence,
         status: 'SENT',
       },
@@ -557,18 +586,29 @@ export class ChannelsService {
 
     this.logger.log(`📨 [MESSAGE] Message ${message.id} created (seq: ${sequence}) in channel ${channelId} by user ${dto.userId}`);
 
-    // 通过 WebSocket 广播消息到频道内所有用户
+    const rawCreated = message.createdAt;
+    const createdAtIso =
+      rawCreated instanceof Date
+        ? rawCreated.toISOString()
+        : typeof rawCreated === 'string'
+          ? rawCreated
+          : new Date(rawCreated as unknown as string).toISOString();
+
+    // 通过 WebSocket 广播（纯 JSON 可序列化字段，避免其他客户端丢 attachment）
     const broadcastData = {
       id: message.id,
       channelId: message.channelId,
       userId: message.userId,
       username: message.user.username,
-      avatar: message.user.avatar,
-      content: message.content,
+      avatar: message.user.avatar ?? null,
+      content: (message.content || '').trim(),
       type: message.type,
       sequence: message.sequence,
       status: message.status,
-      createdAt: message.createdAt,
+      createdAt: createdAtIso,
+      attachmentUrl: message.attachmentUrl ?? null,
+      attachmentName: message.attachmentName ?? null,
+      attachmentMime: message.attachmentMime ?? null,
     };
 
     // 标记消息为待确认
@@ -588,17 +628,19 @@ export class ChannelsService {
     let dbUser = await this.prisma.user.findUnique({ where: { id: userId } });
     if (dbUser) return;
 
-    if (username) {
-      dbUser = await this.prisma.user.findUnique({ where: { username } });
+    const norm = username?.trim().toLowerCase();
+    if (norm) {
+      dbUser = await this.prisma.user.findUnique({ where: { username: norm } });
       if (dbUser) return;
     }
 
-    this.logger.log(`Auto-creating user ${userId} (${username || 'unknown'})`);
+    const uname = norm || `user-${userId.slice(0, 8)}`;
+    this.logger.log(`Auto-creating user ${userId} (${uname})`);
     await this.prisma.user.create({
       data: {
         id: userId,
-        username: username || `user-${userId.slice(0, 8)}`,
-        status: 'ONLINE',
+        username: uname,
+        status: 'OFFLINE',
       },
     });
   }

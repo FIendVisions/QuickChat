@@ -81,15 +81,18 @@ model ChannelMember {
 // ============================================================
 
 model Message {
-  id        String   @id @default(uuid())
-  channelId String
-  userId    String
-  type      String   @default("TEXT")
-  content   String
-  sequence  Int      @default(0) // 消息序列号，用于排序和增量同步
-  status    String   @default("SENT") // 消息状态：SENT, DELIVERED, FAILED
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String   @id @default(uuid())
+  channelId       String
+  userId          String
+  type            String   @default("TEXT")
+  content           String   @default("")
+  attachmentUrl   String?
+  attachmentName  String?
+  attachmentMime  String?
+  sequence        Int      @default(0) // 消息序列号，用于排序和增量同步
+  status          String   @default("SENT") // 消息状态：SENT, DELIVERED, FAILED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)

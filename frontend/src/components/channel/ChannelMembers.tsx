@@ -1,9 +1,11 @@
 // frontend/src/components/channel/ChannelMembers.tsx
+// Discord 风格：固定宽度侧栏、在线/离线分组、单行紧凑成员行
 
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Crown, Shield, ChevronRight, ChevronLeft, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Crown, Shield, PanelRightClose, PanelRightOpen } from 'lucide-react';
+import { useWebSocket } from '@/contexts/WebSocketContext';
 
 interface MemberInfo {
   userId: string;
@@ -22,16 +24,64 @@ interface ChannelMembersProps {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
-export function ChannelMembers({ channelId, userId, isOwner }: ChannelMembersProps) {
+function MemberRow({ member }: { member: MemberInfo }) {
+  return (
+    <div
+      className="group flex h-8 cursor-default items-center gap-2 rounded px-2 hover:bg-white/[0.06]"
+      title={`${member.username}\nID: ${member.userId}`}
+    >
+      <div className="relative h-8 w-8 shrink-0">
+        {member.avatar ? (
+          <img
+            src={member.avatar}
+            alt=""
+            className="h-8 w-8 rounded-md object-cover"
+          />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-tertiary text-xs font-semibold text-text-muted">
+            {(member.username || '?').charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div
+          className={`absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border-[2px] border-bg-secondary ${
+            member.isOnline ? 'bg-[#23a559]' : 'bg-[#80848e]'
+          }`}
+        />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1">
+          <span className="truncate text-[13px] font-medium leading-none text-text-normal">
+            {member.username}
+          </span>
+          {member.role === 'OWNER' && (
+            <Crown size={12} className="shrink-0 text-[#faa61a]" aria-hidden />
+          )}
+          {member.role === 'ADMIN' && (
+            <Shield size={12} className="shrink-0 text-primary" aria-hidden />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <div className="px-2 pb-0.5 pt-2 first:pt-1">
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-text-muted/80">
+        {children}
+      </span>
+    </div>
+  );
+}
+
+export function ChannelMembers({ channelId, userId: _userId, isOwner: _isOwner }: ChannelMembersProps) {
+  const { socket } = useWebSocket();
   const [members, setMembers] = useState<MemberInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
 
-  useEffect(() => {
-    loadMembers();
-  }, [channelId]);
-
-  const loadMembers = async () => {
+  const loadMembers = useCallback(async () => {
     setLoading(true);
     try {
       const response = await fetch(`${API_URL}/channels/${channelId}/members`);
@@ -44,80 +94,120 @@ export function ChannelMembers({ channelId, userId, isOwner }: ChannelMembersPro
     } finally {
       setLoading(false);
     }
-  };
+  }, [channelId]);
 
-  const onlineCount = members.filter(m => m.isOnline).length;
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  useEffect(() => {
+    const t = setInterval(() => loadMembers(), 12000);
+    return () => clearInterval(t);
+  }, [loadMembers]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const setOnline = (uid: string, online: boolean) => {
+      setMembers((prev) =>
+        prev.map((m) => (m.userId === uid ? { ...m, isOnline: online } : m)),
+      );
+    };
+
+    const onOnline = (p: { userId?: string }) => {
+      if (p?.userId) setOnline(p.userId, true);
+    };
+    const onOffline = (p: { userId?: string }) => {
+      if (p?.userId) setOnline(p.userId, false);
+    };
+    const onStatus = (p: { userId?: string; status?: string }) => {
+      if (p?.userId) setOnline(p.userId, p.status !== 'OFFLINE');
+    };
+
+    socket.on('user:online', onOnline);
+    socket.on('user:offline', onOffline);
+    socket.on('user:status', onStatus);
+
+    return () => {
+      socket.off('user:online', onOnline);
+      socket.off('user:offline', onOffline);
+      socket.off('user:status', onStatus);
+    };
+  }, [socket]);
+
+  const { online, offline } = useMemo(() => {
+    const on = members.filter((m) => m.isOnline);
+    const off = members.filter((m) => !m.isOnline);
+    return { online: on, offline: off };
+  }, [members]);
 
   if (collapsed) {
     return (
-      <button
-        onClick={() => setCollapsed(false)}
-        className="flex items-center gap-1 px-2 py-1.5 text-text-muted hover:text-text-normal transition-colors"
-        title="展开成员列表"
-      >
-        <ChevronLeft size={14} />
-        <Users size={14} />
-        <span className="text-xs">{members.length}</span>
-      </button>
+      <div className="flex h-full w-[52px] shrink-0 flex-col items-center border-l border-border-color bg-bg-secondary py-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+          title="显示成员列表"
+        >
+          <PanelRightOpen size={18} />
+        </button>
+        <div className="mt-2 flex flex-col items-center gap-0.5 text-[10px] text-text-muted">
+          <span className="font-semibold text-text-normal">{members.length}</span>
+          <span className="text-[#23a559]">{online.length}</span>
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full w-48 border-l border-border-color bg-bg-secondary">
-      {/* header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border-color">
-        <div className="flex items-center gap-1.5">
-          <Users size={12} className="text-text-muted" />
-          <span className="text-xs font-medium text-text-muted">
-            成员 {members.length}
-          </span>
-          <span className="text-[10px] text-success">● {onlineCount}</span>
-        </div>
+    <aside className="flex h-full w-[232px] shrink-0 flex-col border-l border-border-color bg-bg-secondary">
+      {/* 顶栏：极窄，类似 Discord「成员」标题区 */}
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color/80 px-2">
+        <span className="pl-1 text-xs font-semibold uppercase tracking-wide text-text-muted">
+          成员 — {members.length}
+        </span>
         <button
+          type="button"
           onClick={() => setCollapsed(true)}
-          className="text-text-muted hover:text-text-normal transition-colors"
-          title="收起"
+          className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-normal"
+          title="收起成员列表"
         >
-          <ChevronRight size={14} />
+          <PanelRightClose size={16} />
         </button>
       </div>
 
-      {loading ? (
-        <div className="p-3 text-xs text-text-muted animate-pulse">加载中...</div>
-      ) : (
-        <div className="flex-1 overflow-y-auto py-1">
-          {members.map((member) => (
-            <div
-              key={member.userId}
-              className="flex items-center gap-2 px-3 py-1 hover:bg-bg-hover/50 transition-colors"
-            >
-              {/* avatar + online dot */}
-              <div className="relative flex-shrink-0">
-                <div className="w-6 h-6 rounded-full bg-bg-tertiary flex items-center justify-center text-[10px] text-text-muted font-medium">
-                  {(member.username || '?').charAt(0).toUpperCase()}
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+        {loading ? (
+          <div className="px-3 py-2 text-xs text-text-muted">加载中…</div>
+        ) : (
+          <>
+            {online.length > 0 && (
+              <>
+                <SectionLabel>在线 — {online.length}</SectionLabel>
+                <div className="space-y-0.5 px-1 pb-1">
+                  {online.map((m) => (
+                    <MemberRow key={m.userId} member={m} />
+                  ))}
                 </div>
-                <div
-                  className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-[1.5px] border-bg-secondary ${
-                    member.isOnline ? 'bg-success' : 'bg-text-muted/40'
-                  }`}
-                />
-              </div>
-
-              {/* name + id */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-text-normal truncate">{member.username}</span>
-                  {member.role === 'OWNER' && <Crown size={10} className="text-warning flex-shrink-0" />}
-                  {member.role === 'ADMIN' && <Shield size={10} className="text-primary flex-shrink-0" />}
+              </>
+            )}
+            {offline.length > 0 && (
+              <>
+                <SectionLabel>离线 — {offline.length}</SectionLabel>
+                <div className="space-y-0.5 px-1 pb-2">
+                  {offline.map((m) => (
+                    <MemberRow key={m.userId} member={m} />
+                  ))}
                 </div>
-                <p className="text-[10px] text-text-muted/60 truncate font-mono leading-tight">
-                  {member.userId.length > 12 ? member.userId.slice(0, 12) + '…' : member.userId}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+              </>
+            )}
+            {members.length === 0 && (
+              <p className="px-3 py-4 text-center text-xs text-text-muted">暂无成员</p>
+            )}
+          </>
+        )}
+      </div>
+    </aside>
   );
 }

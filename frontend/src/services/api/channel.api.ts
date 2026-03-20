@@ -122,6 +122,29 @@ export const channelApi = {
     return handleResponse(response);
   },
 
+  async uploadAttachment(channelId: string, file: File): Promise<{
+    url: string;
+    filename: string;
+    mimeType: string;
+    size: number;
+  }> {
+    const form = new FormData();
+    form.append('file', file);
+    const headers: HeadersInit = {};
+    const token = localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_URL}/channels/${channelId}/upload`, {
+      method: 'POST',
+      headers,
+      body: form,
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => null);
+      throw new Error(err?.message || '上传失败');
+    }
+    return response.json();
+  },
+
   async getMessages(channelId: string, page: number = 1, pageSize: number = 50): Promise<{
     messages: any[];
     total: number;
