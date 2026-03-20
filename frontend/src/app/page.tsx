@@ -5,21 +5,20 @@ import { TopBar } from '@/components/layout/TopBar';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { UserSelfPanel } from '@/components/layout/UserSelfPanel';
 import { ChannelList } from '@/components/channel/ChannelList';
-import { ChannelMembers } from '@/components/channel/ChannelMembers';
-import { MessageList, MessageListRef } from '@/components/message/MessageList';
-import { MessageInput } from '@/components/message/MessageInput';
+import { MessageListRef } from '@/components/message/MessageList';
 import { ChannelSettingsModal } from '@/components/channel/ChannelSettingsModal';
 import { PublicChannelBrowser } from '@/components/channel/PublicChannelBrowser';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { LiveWatchProvider } from '@/contexts/LiveWatchContext';
-import { LiveWatchSlot } from '@/components/live/LiveWatchSlot';
+import { ChatMainStack } from '@/components/chat/ChatMainStack';
 import { Channel } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
 import { resolveUploadUrl } from '@/lib/mediaUrl';
 import { mapChannelMessage, messageToReplyRef } from '@/lib/mapChannelMessage';
 import { loadPersonalPins, togglePersonalPin } from '@/lib/pinnedMessages';
+import { getApiOrigin } from '@/lib/serverOrigin';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
 import type { EveryonePin } from '@/types/pin.types';
 
@@ -65,7 +64,7 @@ export default function HomePage() {
       });
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/channels/${selectedChannel.id}/messages`,
+        `${getApiOrigin()}/channels/${selectedChannel.id}/messages`,
         {
           method: 'POST',
           headers: {
@@ -415,93 +414,37 @@ export default function HomePage() {
                   onChannelSelect={handleChannelSelect}
                 />
               ) : selectedChannel ? (
-                <>
-                  {/* Discord 式：标题栏横跨消息区+成员区整宽 */}
-                  <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color bg-bg-tertiary px-4 shadow-sm">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="text-base text-text-muted">
-                        {selectedChannel.type === 'PUBLIC' ? '#' : '🔒'}
-                      </span>
-                      <h2 className="truncate text-sm font-semibold text-text-normal">{selectedChannel.name}</h2>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      {isOwner && !isOfficialChannel && (
-                        <button
-                          type="button"
-                          onClick={() => setShowSettings(true)}
-                          className="rounded p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-normal text-sm"
-                        >
-                          ⚙️
-                        </button>
-                      )}
-                      {!isOfficialChannel && (
-                        <button
-                          type="button"
-                          onClick={handleLeaveChannel}
-                          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-hover hover:text-text-normal"
-                        >
-                          🚪 退出
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <LiveWatchSlot channelId={selectedChannel.id} />
-
-                  {/* 消息区 + 成员区同高，输入框仅在左侧（Discord 布局） */}
-                  <div className="flex min-h-0 flex-1 overflow-hidden">
-                    <div
-                      className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${chatDragOver ? 'ring-2 ring-inset ring-primary' : ''}`}
-                      onDragEnter={handleChatDragEnter}
-                      onDragLeave={handleChatDragLeave}
-                      onDragOverCapture={(e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.types?.includes?.('Files')) {
-                          e.dataTransfer.dropEffect = 'copy';
-                        }
-                      }}
-                      onDropCapture={(e) => {
-                        void handleChatDrop(e);
-                      }}
-                    >
-                      {chatDragOver && (
-                        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-primary/15 text-sm font-medium text-text-normal backdrop-blur-[1px]">
-                          松开鼠标发送文件
-                        </div>
-                      )}
-                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                        <MessageList
-                          ref={messageListRef}
-                          channelId={selectedChannel.id}
-                          userId={user.id}
-                          onReply={setReplyTo}
-                          personalPinIds={personalPinIds}
-                          everyonePins={everyonePins}
-                          onTogglePersonalPin={handleTogglePersonalPin}
-                          onToggleEveryonePin={handleToggleEveryonePin}
-                          onUnpinEveryone={handleUnpinEveryone}
-                          onEveryonePinsRefresh={refreshEveryonePins}
-                        />
-                      </div>
-                      <div className="shrink-0 border-t border-border-color bg-bg-tertiary px-3 py-2">
-                        <MessageInput
-                          channelId={selectedChannel.id}
-                          currentUserId={user.id}
-                          currentUsername={user.username}
-                          replyTo={replyTo}
-                          onCancelReply={() => setReplyTo(null)}
-                          onSend={handleMessageSend}
-                        />
-                      </div>
-                    </div>
-
-                    <ChannelMembers
-                      channelId={selectedChannel.id}
-                      userId={user.id}
-                      isOwner={isOwner}
-                    />
-                  </div>
-                </>
+                <ChatMainStack
+                  channel={selectedChannel}
+                  user={user}
+                  token={token}
+                  isOwner={isOwner}
+                  isOfficialChannel={isOfficialChannel}
+                  messageListRef={messageListRef}
+                  replyTo={replyTo}
+                  setReplyTo={setReplyTo}
+                  personalPinIds={personalPinIds}
+                  everyonePins={everyonePins}
+                  onTogglePersonalPin={handleTogglePersonalPin}
+                  onToggleEveryonePin={handleToggleEveryonePin}
+                  onUnpinEveryone={handleUnpinEveryone}
+                  onEveryonePinsRefresh={refreshEveryonePins}
+                  onMessageSend={handleMessageSend}
+                  chatDragOver={chatDragOver}
+                  onDragEnter={handleChatDragEnter}
+                  onDragLeave={handleChatDragLeave}
+                  onDragOverCapture={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.types?.includes?.('Files')) {
+                      e.dataTransfer.dropEffect = 'copy';
+                    }
+                  }}
+                  onDropCapture={(e) => {
+                    void handleChatDrop(e);
+                  }}
+                  onLeaveChannel={handleLeaveChannel}
+                  onOpenSettings={() => setShowSettings(true)}
+                />
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center text-center">
                   <div className="mb-4 text-5xl">💬</div>

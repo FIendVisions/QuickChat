@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
+import { Device } from 'mediasoup-client';
+import type { types as msTypes } from 'mediasoup-client';
 import type { Socket } from 'socket.io-client';
-import { DEFAULT_ICE_SERVERS } from '@/lib/webrtcConfig';
+import { sfuRequest } from '@/lib/sfuSignaling';
 
 interface UseLivePublisherOptions {
   socket: Socket | null;
@@ -10,16 +12,14 @@ interface UseLivePublisherOptions {
   userId: string;
   screenStreamRef: React.MutableRefObject<MediaStream | null>;
   camStreamRef: React.MutableRefObject<MediaStream | null>;
-}
-
-interface PeerIceMeta {
-  pending: RTCIceCandidateInit[];
-  remoteAnswerSet: boolean;
+  screenOn: boolean;
+  camOn: boolean;
 }
 
 /**
- * 作为「主播」：响应 webrtc:watch-request，为每个观众建独立 RTCPeerConnection。
- * 观众 ICE 若早于 answer 的 setRemoteDescription 到达，先入队再 flush。
+ * SFU-based live publisher.
+ * Pushes screen/camera streams to the mediasoup SFU server,
+ * which then selectively forwards them to viewers.
  */
 export function useLivePublisher({
   socket,
@@ -27,163 +27,177 @@ export function useLivePublisher({
   userId,
   screenStreamRef,
   camStreamRef,
+  screenOn,
+  camOn,
 }: UseLivePublisherOptions) {
-  const peersRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const peerIceRef = useRef<Map<string, PeerIceMeta>>(new Map());
+  const deviceRef = useRef<Device | null>(null);
+  const transportRef = useRef<msTypes.Transport | null>(null);
+  const producersRef = useRef(new Map<string, msTypes.Producer>());
+  const sessionRef = useRef(0);
 
-  const removePeer = useCallback((viewerId: string) => {
-    const pc = peersRef.current.get(viewerId);
-    if (pc) {
-      pc.close();
-      peersRef.current.delete(viewerId);
+  useEffect(() => {
+    if (!socket?.connected || !channelId) return;
+
+    const closeSources = (sources: string[]) => {
+      for (const src of sources) {
+        const p = producersRef.current.get(src);
+        if (p && !p.closed) {
+          socket.emit('sfu:closeProducer', { producerId: p.id });
+          p.close();
+        }
+        producersRef.current.delete(src);
+      }
+    };
+
+    if (!screenOn && !camOn) {
+      closeSources(Array.from(producersRef.current.keys()));
+      return;
     }
-    peerIceRef.current.delete(viewerId);
-  }, []);
 
-  const handleRemoteSignal = useCallback(
-    async (data: {
-      channelId: string;
-      fromUserId: string;
-      type: string;
-      sdp?: RTCSessionDescriptionInit;
-      candidate?: RTCIceCandidateInit;
-    }) => {
-      if (!socket || !channelId || data.channelId !== channelId) return;
-      if (data.fromUserId === userId) return;
+    const session = ++sessionRef.current;
+    const stale = () => session !== sessionRef.current;
 
-      const pc = peersRef.current.get(data.fromUserId);
-      if (!pc) return;
-
-      let meta = peerIceRef.current.get(data.fromUserId);
-      if (!meta) {
-        meta = { pending: [], remoteAnswerSet: false };
-        peerIceRef.current.set(data.fromUserId, meta);
-      }
-
+    const run = async () => {
       try {
-        if (data.type === 'answer' && data.sdp) {
-          await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-          meta.remoteAnswerSet = true;
-          const copy = [...meta.pending];
-          meta.pending.length = 0;
-          for (const c of copy) {
-            try {
-              await pc.addIceCandidate(c);
-            } catch (e) {
-              console.warn('[live/publisher] flush ice', e);
-            }
-          }
-        } else if (data.type === 'ice-candidate' && data.candidate) {
-          if (!meta.remoteAnswerSet) {
-            meta.pending.push(data.candidate);
-          } else {
-            await pc.addIceCandidate(data.candidate);
-          }
-        }
-      } catch (e) {
-        console.warn('[live/publisher] signal handling failed', e);
-      }
-    },
-    [socket, channelId, userId],
-  );
-
-  const createOfferForViewer = useCallback(
-    async (viewerId: string) => {
-      if (!socket || !channelId) return;
-
-      removePeer(viewerId);
-      peerIceRef.current.set(viewerId, { pending: [], remoteAnswerSet: false });
-
-      const screen = screenStreamRef.current;
-      const cam = camStreamRef.current;
-      if (!screen && !cam) {
-        return;
-      }
-
-      const pc = new RTCPeerConnection({ iceServers: DEFAULT_ICE_SERVERS });
-      peersRef.current.set(viewerId, pc);
-
-      pc.onicecandidate = (ev) => {
-        if (ev.candidate && socket.connected) {
-          socket.emit('webrtc:signal', {
-            channelId,
-            toUserId: viewerId,
-            type: 'ice-candidate',
-            candidate: ev.candidate.toJSON(),
+        // --- Device ---
+        if (!deviceRef.current) {
+          const caps = await sfuRequest(
+            socket,
+            'sfu:getRouterRtpCapabilities',
+          );
+          if (stale()) return;
+          const dev = new Device();
+          await dev.load({
+            routerRtpCapabilities: caps as msTypes.RtpCapabilities,
           });
+          if (stale()) return;
+          deviceRef.current = dev;
         }
-      };
 
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-          removePeer(viewerId);
+        // --- SendTransport ---
+        if (!transportRef.current || transportRef.current.closed) {
+          const params = await sfuRequest<{
+            id: string;
+            iceParameters: any;
+            iceCandidates: any;
+            dtlsParameters: any;
+          }>(socket, 'sfu:createProducerTransport', { channelId });
+          if (stale()) return;
+
+          const t = deviceRef.current!.createSendTransport(params);
+
+          t.on(
+            'connect',
+            (
+              { dtlsParameters }: any,
+              cb: () => void,
+              eb: (e: Error) => void,
+            ) => {
+              sfuRequest(socket, 'sfu:connectTransport', {
+                transportId: t.id,
+                dtlsParameters,
+              })
+                .then(() => cb())
+                .catch(eb);
+            },
+          );
+
+          t.on(
+            'produce',
+            (
+              { kind, rtpParameters, appData }: any,
+              cb: (arg: { id: string }) => void,
+              eb: (e: Error) => void,
+            ) => {
+              sfuRequest<{ producerId: string }>(socket, 'sfu:produce', {
+                transportId: t.id,
+                kind,
+                rtpParameters,
+                appData: { ...appData, channelId, userId },
+              })
+                .then(({ producerId }) => cb({ id: producerId }))
+                .catch(eb);
+            },
+          );
+
+          if (stale()) {
+            t.close();
+            return;
+          }
+          transportRef.current = t;
         }
-      };
 
-      if (screen) {
-        screen.getTracks().forEach((t) => pc.addTrack(t, screen));
-      }
-      if (cam) {
-        cam.getTracks().forEach((t) => pc.addTrack(t, cam));
-      }
+        const transport = transportRef.current!;
 
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc:signal', {
-          channelId,
-          toUserId: viewerId,
-          type: 'offer',
-          sdp: { type: offer.type, sdp: offer.sdp },
-        });
+        const produceTrack = async (
+          track: MediaStreamTrack,
+          source: string,
+        ) => {
+          const existing = producersRef.current.get(source);
+          if (existing && !existing.closed) return;
+
+          const producer = await transport.produce({
+            track,
+            appData: { source },
+          });
+          if (stale()) {
+            producer.close();
+            return;
+          }
+          producersRef.current.set(source, producer);
+
+          producer.on('trackended', () => {
+            if (!producer.closed) {
+              producer.close();
+              socket.emit('sfu:closeProducer', { producerId: producer.id });
+            }
+            producersRef.current.delete(source);
+          });
+        };
+
+        // --- Screen producers ---
+        if (screenOn && screenStreamRef.current) {
+          for (const track of screenStreamRef.current.getTracks()) {
+            if (stale()) return;
+            const source =
+              track.kind === 'video' ? 'screen-video' : 'screen-audio';
+            await produceTrack(track, source);
+          }
+        } else {
+          closeSources(['screen-video', 'screen-audio']);
+        }
+
+        // --- Camera producer ---
+        if (camOn && camStreamRef.current) {
+          const vt = camStreamRef.current.getVideoTracks()[0];
+          if (vt && !stale()) {
+            await produceTrack(vt, 'camera-video');
+          }
+        } else {
+          closeSources(['camera-video']);
+        }
       } catch (e) {
-        console.warn('[live/publisher] createOffer failed', e);
-        removePeer(viewerId);
+        console.error('[live/publisher] SFU error:', e);
       }
-    },
-    [socket, channelId, removePeer, screenStreamRef, camStreamRef],
-  );
-
-  useEffect(() => {
-    if (!socket || !channelId) return;
-
-    const onWatchRequest = (payload: { channelId: string; fromUserId: string }) => {
-      if (payload.channelId !== channelId) return;
-      if (payload.fromUserId === userId) return;
-      void createOfferForViewer(payload.fromUserId);
     };
 
-    const onWatchStop = (payload: { channelId: string; fromUserId: string }) => {
-      if (payload.channelId !== channelId) return;
-      removePeer(payload.fromUserId);
-    };
+    run();
 
-    const onSignal = (data: {
-      channelId: string;
-      fromUserId: string;
-      type: string;
-      sdp?: RTCSessionDescriptionInit;
-      candidate?: RTCIceCandidateInit;
-    }) => {
-      void handleRemoteSignal(data);
-    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socket, channelId, userId, screenOn, camOn]);
 
-    socket.on('webrtc:watch-request', onWatchRequest);
-    socket.on('webrtc:watch-stop', onWatchStop);
-    socket.on('webrtc:signal', onSignal);
-
-    return () => {
-      socket.off('webrtc:watch-request', onWatchRequest);
-      socket.off('webrtc:watch-stop', onWatchStop);
-      socket.off('webrtc:signal', onSignal);
-    };
-  }, [socket, channelId, userId, createOfferForViewer, removePeer, handleRemoteSignal]);
-
+  // Full cleanup on channel change or unmount
   useEffect(() => {
     return () => {
-      peersRef.current.forEach((pc) => pc.close());
-      peersRef.current.clear();
-      peerIceRef.current.clear();
+      producersRef.current.forEach((p) => {
+        if (!p.closed) p.close();
+      });
+      producersRef.current.clear();
+      if (transportRef.current && !transportRef.current.closed) {
+        transportRef.current.close();
+      }
+      transportRef.current = null;
+      deviceRef.current = null;
     };
   }, [channelId]);
 }

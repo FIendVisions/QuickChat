@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Crown, Shield, PanelRightClose, PanelRightOpen, Monitor, Video } from 'lucide-react';
 import { useWebSocket } from '@/contexts/WebSocketContext';
 import { useLiveWatch } from '@/contexts/LiveWatchContext';
+import { getApiOrigin } from '@/lib/serverOrigin';
 
 interface MemberInfo {
   userId: string;
@@ -22,8 +23,6 @@ interface ChannelMembersProps {
   userId: string;
   isOwner: boolean;
 }
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 interface MemberMedia {
   screen: boolean;
@@ -136,7 +135,7 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
   const loadMembers = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${API_URL}/channels/${channelId}/members`);
+      const response = await fetch(`${getApiOrigin()}/channels/${channelId}/members`);
       if (response.ok) {
         const data = await response.json();
         setMembers(Array.isArray(data) ? data : (data.members || []));
@@ -177,9 +176,28 @@ export function ChannelMembers({ channelId, userId: currentUserId, isOwner: _isO
       });
     };
 
+    /** 加入房间后服务端下发的全量媒体状态（刷新页后恢复「谁在播」） */
+    const onSnapshot = (p: {
+      channelId: string;
+      states?: Array<{ userId: string; screen?: boolean; camera?: boolean }>;
+    }) => {
+      if (p.channelId !== channelId) return;
+      setMediaByUser(() => {
+        const next: Record<string, MemberMedia> = {};
+        for (const s of p.states || []) {
+          if (s.screen || s.camera) {
+            next[s.userId] = { screen: !!s.screen, camera: !!s.camera };
+          }
+        }
+        return next;
+      });
+    };
+
     socket.on('channel:media:state', onMedia);
+    socket.on('channel:media:snapshot', onSnapshot);
     return () => {
       socket.off('channel:media:state', onMedia);
+      socket.off('channel:media:snapshot', onSnapshot);
     };
   }, [socket, channelId]);
 

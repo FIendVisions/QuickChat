@@ -46,6 +46,8 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
     userId,
     screenStreamRef,
     camStreamRef,
+    screenOn,
+    camOn,
   });
 
   useEffect(() => {
@@ -102,6 +104,21 @@ export function UserSelfPanel({ username, email, channelId, userId }: UserSelfPa
       broadcastMediaState(screenOn, camOn);
     }, 200);
     return () => window.clearTimeout(t);
+  }, [socket, channelId, screenOn, camOn, broadcastMediaState]);
+
+  /** Socket 重连后服务端内存状态可能清空，再次声明当前是否在播 */
+  useEffect(() => {
+    if (!socket) return;
+    const onConnect = () => {
+      if (!channelId) return;
+      if (screenOn || camOn) {
+        window.setTimeout(() => broadcastMediaState(screenOn, camOn), 180);
+      }
+    };
+    socket.on('connect', onConnect);
+    return () => {
+      socket.off('connect', onConnect);
+    };
   }, [socket, channelId, screenOn, camOn, broadcastMediaState]);
 
   const usernameRef = useRef(username);

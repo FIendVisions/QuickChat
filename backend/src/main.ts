@@ -13,13 +13,16 @@ async function bootstrap() {
     prefix: '/uploads/',
   });
 
-  // 启用 CORS
+  // 启用 CORS（开发环境允许任意来源，便于内网 IP 访问；生产环境白名单）
+  const isProd = process.env.NODE_ENV === 'production';
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://127.0.0.1:3000',
-      process.env.FRONTEND_URL,
-    ].filter(Boolean),
+    origin: isProd
+      ? ([
+          'http://localhost:3000',
+          'http://127.0.0.1:3000',
+          process.env.FRONTEND_URL,
+        ].filter(Boolean) as string[])
+      : true,
     credentials: true,
   });
 

@@ -4,7 +4,10 @@
  * 应用配置常量
  */
 export const APP_CONFIG = {
-  // API 配置
+  /**
+   * 浏览器内请使用 @/lib/serverOrigin 的 getApiOrigin() / getWsOrigin()，以支持内网 IP 访问。
+   * 此处仅作构建期/文档向后的占位。
+   */
   API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
   WS_URL: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001',
 

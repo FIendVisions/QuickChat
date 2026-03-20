@@ -1,5 +1,3 @@
-// backend/src/gateway/websocket.gateway.ts
-
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -9,14 +7,16 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
+import { MediasoupService } from '../mediasoup/mediasoup.service';
 
-/**
- * WebSocket Gateway
- * 处理实时通信
- */
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? (['http://localhost:3000', 'http://127.0.0.1:3000', process.env.FRONTEND_URL].filter(
+            Boolean,
+          ) as string[])
+        : true,
     credentials: true,
   },
 })
@@ -26,6 +26,35 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   private readonly logger = new Logger(WebsocketGateway.name);
   private connectedClients = new Map<string, Set<string>>();
+
+  /** 各频道内「正在直播」的用户（内存态，刷新后加入者可收到快照） */
+  private channelMediaStates = new Map<
+    string,
+    Map<string, { username: string; screen: boolean; camera: boolean }>
+  >();
+
+  constructor(private readonly mediasoup: MediasoupService) {}
+
+  private getMediaMap(channelId: string) {
+    if (!this.channelMediaStates.has(channelId)) {
+      this.channelMediaStates.set(channelId, new Map());
+    }
+    return this.channelMediaStates.get(channelId)!;
+  }
+
+  private removeUserMediaState(channelId: string, userId: string) {
+    const m = this.channelMediaStates.get(channelId);
+    if (!m?.has(userId)) return;
+    m.delete(userId);
+    this.server.to(`channel:${channelId}`).emit('channel:media:state', {
+      channelId,
+      userId,
+      username: '',
+      screen: false,
+      camera: false,
+      ts: Date.now(),
+    });
+  }
 
   handleConnection(client: Socket) {
     const userId = client.handshake.query.userId as string;
@@ -37,13 +66,14 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       }
       this.connectedClients.get(userId)!.add(client.id);
 
-      // 通知其他用户该用户上线
       this.server.emit('user:online', {
         userId,
         socketId: client.id,
         timestamp: new Date().toISOString(),
       });
     }
+
+    this.registerSfuHandlers(client, userId);
   }
 
   handleDisconnect(client: Socket) {
@@ -51,73 +81,270 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.log(`Client disconnected: ${client.id} (User: ${userId})`);
 
     if (userId) {
+      const rooms = Array.from(client.rooms);
+      for (const r of rooms) {
+        if (r.startsWith('channel:')) {
+          const channelId = r.slice('channel:'.length);
+          this.removeUserMediaState(channelId, userId);
+        }
+      }
+
       const userClients = this.connectedClients.get(userId);
       if (userClients) {
         userClients.delete(client.id);
 
-        // 如果用户没有其他连接，通知其他用户该用户离线
         if (userClients.size === 0) {
           this.connectedClients.delete(userId);
           this.server.emit('user:offline', {
             userId,
             timestamp: new Date().toISOString(),
           });
+
+          const closedProducers = this.mediasoup.cleanupUser(userId);
+          for (const cp of closedProducers) {
+            this.server
+              .to(`live:${cp.channelId}:${cp.userId}`)
+              .emit('sfu:producerClosed', {
+                producerId: cp.producerId,
+                channelId: cp.channelId,
+                userId: cp.userId,
+              });
+          }
         }
       }
     }
   }
 
-  /**
-   * 获取用户的所有连接
-   */
+  // ===== SFU signaling (registered per-socket for native Socket.IO ack support) =====
+
+  private registerSfuHandlers(client: Socket, userId: string) {
+    if (!userId) return;
+
+    client.on(
+      'sfu:getRouterRtpCapabilities',
+      (callback: (data: any) => void) => {
+        if (typeof callback !== 'function') return;
+        callback(this.mediasoup.getRouterRtpCapabilities());
+      },
+    );
+
+    client.on(
+      'sfu:createProducerTransport',
+      async (
+        payload: { channelId: string },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          const params = await this.mediasoup.createWebRtcTransport(
+            userId,
+            payload.channelId,
+          );
+          callback({ ok: true, data: params });
+        } catch (e: any) {
+          this.logger.warn(`createProducerTransport failed: ${e.message}`);
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:createConsumerTransport',
+      async (
+        payload: { channelId: string },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          const params = await this.mediasoup.createWebRtcTransport(
+            userId,
+            payload.channelId,
+          );
+          callback({ ok: true, data: params });
+        } catch (e: any) {
+          this.logger.warn(`createConsumerTransport failed: ${e.message}`);
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:connectTransport',
+      async (
+        payload: { transportId: string; dtlsParameters: any },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          await this.mediasoup.connectTransport(
+            payload.transportId,
+            payload.dtlsParameters,
+          );
+          callback({ ok: true });
+        } catch (e: any) {
+          this.logger.warn(`connectTransport failed: ${e.message}`);
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:produce',
+      async (
+        payload: {
+          transportId: string;
+          kind: string;
+          rtpParameters: any;
+          appData: Record<string, any>;
+        },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          const appData: Record<string, any> = { ...payload.appData, userId };
+          const producerId = await this.mediasoup.produce(
+            payload.transportId,
+            payload.kind as 'audio' | 'video',
+            payload.rtpParameters,
+            appData,
+          );
+
+          const channelId = appData.channelId as string;
+          this.server
+            .to(`live:${channelId}:${userId}`)
+            .emit('sfu:newProducer', {
+              producerId,
+              kind: payload.kind,
+              appData,
+            });
+
+          callback({ ok: true, data: { producerId } });
+        } catch (e: any) {
+          this.logger.warn(`produce failed: ${e.message}`);
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:consume',
+      async (
+        payload: {
+          transportId: string;
+          producerId: string;
+          rtpCapabilities: any;
+        },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          const result = await this.mediasoup.consume(
+            payload.transportId,
+            payload.producerId,
+            payload.rtpCapabilities,
+          );
+          callback({ ok: true, data: result });
+        } catch (e: any) {
+          this.logger.warn(`consume failed: ${e.message}`);
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:resumeConsumer',
+      async (
+        payload: { consumerId: string },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        try {
+          await this.mediasoup.resumeConsumer(payload.consumerId);
+          callback({ ok: true });
+        } catch (e: any) {
+          callback({ ok: false, error: e.message });
+        }
+      },
+    );
+
+    client.on(
+      'sfu:getProducers',
+      (
+        payload: { channelId: string; broadcasterUserId: string },
+        callback: (data: any) => void,
+      ) => {
+        if (typeof callback !== 'function') return;
+        const producers = this.mediasoup.getProducersForUser(
+          payload.channelId,
+          payload.broadcasterUserId,
+        );
+        callback({ ok: true, data: producers });
+      },
+    );
+
+    client.on(
+      'sfu:closeProducer',
+      (
+        payload: { producerId: string },
+        callback?: (data: any) => void,
+      ) => {
+        const info = this.mediasoup.closeProducer(payload.producerId);
+        if (info) {
+          this.server
+            .to(`live:${info.channelId}:${info.userId}`)
+            .emit('sfu:producerClosed', {
+              producerId: payload.producerId,
+              channelId: info.channelId,
+              userId: info.userId,
+            });
+        }
+        if (typeof callback === 'function') callback({ ok: true });
+      },
+    );
+
+    client.on(
+      'sfu:joinLiveRoom',
+      (payload: { channelId: string; broadcasterUserId: string }) => {
+        const roomName = `live:${payload.channelId}:${payload.broadcasterUserId}`;
+        client.join(roomName);
+      },
+    );
+
+    client.on(
+      'sfu:leaveLiveRoom',
+      (payload: { channelId: string; broadcasterUserId: string }) => {
+        const roomName = `live:${payload.channelId}:${payload.broadcasterUserId}`;
+        client.leave(roomName);
+      },
+    );
+  }
+
+  // ===== Helpers =====
+
   getUserConnections(userId: string): string[] {
     return Array.from(this.connectedClients.get(userId) || []);
   }
 
-  /**
-   * 检查用户是否在线
-   */
   isUserOnline(userId: string): boolean {
     const connections = this.connectedClients.get(userId);
-    return connections && connections.size > 0;
+    return !!(connections && connections.size > 0);
   }
 
-  /**
-   * 发送消息到特定频道
-   * 使用Socket.IO的房间功能，确保消息只发送给频道内的用户
-   */
   sendToChannel(channelId: string, event: string, data: any) {
-    // 使用房间名称格式，确保只广播给加入该房间的用户
-    const roomName = `channel:${channelId}`;
-
-    this.logger.log(`📡 [BROADCAST] Broadcasting to room "${roomName}"`);
-    this.logger.log(`📡 [BROADCAST] Event: "${event}"`);
-    this.logger.log(`📡 [BROADCAST] Data: ${JSON.stringify(data).substring(0, 100)}...`);
-
-    // 广播到房间
-    this.server.to(roomName).emit(event, data);
-
-    this.logger.log(`✅ [BROADCAST] Message sent to room "${roomName}"`);
+    this.server.to(`channel:${channelId}`).emit(event, data);
   }
 
-  /**
-   * 广播消息到所有连接的客户端
-   */
   broadcast(event: string, data: any) {
     this.server.emit(event, data);
   }
 
-  /**
-   * 发送消息到特定用户
-   */
   sendToUser(userId: string, event: string, data: any) {
     const connections = this.getUserConnections(userId);
-    connections.forEach(socketId => {
+    connections.forEach((socketId) => {
       this.server.to(socketId).emit(event, data);
     });
   }
 
-  /** 该用户的任一线程是否已加入频道房间 */
   private isUserInChannelRoom(userId: string, channelId: string): boolean {
     const roomName = `channel:${channelId}`;
     const room = this.server.sockets.adapter.rooms.get(roomName);
@@ -133,14 +360,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     const { channelId, userId } = payload;
     const roomName = `channel:${channelId}`;
 
-    this.logger.log(`🏠 [JOIN] User ${userId} joining room ${roomName}`);
-    this.logger.log(`🏠 [JOIN] Socket ID: ${client.id}`);
-
     client.join(roomName);
 
-    this.logger.log(`✅ [JOIN] User ${userId} joined room ${roomName}`);
+    const mediaMap = this.getMediaMap(channelId);
+    const states = Array.from(mediaMap.entries()).map(([uid, v]) => ({
+      userId: uid,
+      username: v.username,
+      screen: v.screen,
+      camera: v.camera,
+    }));
+    client.emit('channel:media:snapshot', { channelId, states });
 
-    // 通知频道内的其他用户
     client.to(roomName).emit('member:joined', {
       channelId,
       userId,
@@ -153,16 +383,15 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('leave:channel')
   handleLeaveChannel(client: Socket, payload: { channelId: string; userId: string }) {
     const { channelId, userId } = payload;
+    const socketUserId = client.handshake.query.userId as string;
     const roomName = `channel:${channelId}`;
-
-    this.logger.log(`🚪 [LEAVE] User ${userId} leaving room ${roomName}`);
-    this.logger.log(`🚪 [LEAVE] Socket ID: ${client.id}`);
 
     client.leave(roomName);
 
-    this.logger.log(`✅ [LEAVE] User ${userId} left room ${roomName}`);
+    if (socketUserId) {
+      this.removeUserMediaState(channelId, socketUserId);
+    }
 
-    // 通知频道内的其他用户
     client.to(roomName).emit('member:left', {
       channelId,
       userId,
@@ -177,9 +406,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('message:send')
   handleMessageSend(client: Socket, payload: { channelId: string; userId: string; content: string }) {
     const { channelId, userId, content } = payload;
-    this.logger.log(`Message sent in channel ${channelId} by user ${userId}`);
 
-    // 广播到频道内的所有用户（包括发送者）
     this.server.to(`channel:${channelId}`).emit('message:new', {
       channelId,
       userId,
@@ -195,9 +422,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   @SubscribeMessage('status:update')
   handleStatusUpdate(client: Socket, payload: { userId: string; status: string }) {
     const { userId, status } = payload;
-    this.logger.log(`User ${userId} status updated to ${status}`);
 
-    // 广播到所有用户
     this.server.emit('user:status', {
       userId,
       status,
@@ -207,7 +432,7 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     return { event: 'status_updated', data: { userId, status } };
   }
 
-  // ========== 直播：屏幕 / 摄像头状态 + WebRTC 信令转发 ==========
+  // ========== 直播：媒体状态广播 ==========
 
   @SubscribeMessage('channel:media:state')
   handleChannelMediaState(
@@ -229,6 +454,17 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
       return { ok: false, error: 'not_in_channel' };
     }
 
+    const mediaMap = this.getMediaMap(payload.channelId);
+    if (!payload.screen && !payload.camera) {
+      mediaMap.delete(payload.userId);
+    } else {
+      mediaMap.set(payload.userId, {
+        username: payload.username || '用户',
+        screen: !!payload.screen,
+        camera: !!payload.camera,
+      });
+    }
+
     this.server.to(roomName).emit('channel:media:state', {
       channelId: payload.channelId,
       userId: payload.userId,
@@ -239,6 +475,8 @@ export class WebsocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     });
     return { ok: true };
   }
+
+  // ========== Legacy P2P WebRTC signaling (kept for compatibility) ==========
 
   @SubscribeMessage('webrtc:watch-request')
   handleWebrtcWatchRequest(client: Socket, payload: { channelId: string; targetUserId: string }) {

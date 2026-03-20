@@ -5,6 +5,7 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { getMessageSyncManager, Message } from '@/services/messageSync/MessageSyncManager';
+import { getWsOrigin } from '@/lib/serverOrigin';
 
 interface WebSocketContextType {
   socket: Socket | null;
@@ -43,7 +44,7 @@ export function WebSocketProviderV2({ children, userId, token }: WebSocketProvid
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
+    const wsUrl = getWsOrigin();
 
     console.log('🔌 ========== [WebSocket] Creating connection ==========');
     console.log('🔌 [WebSocket] URL:', wsUrl);

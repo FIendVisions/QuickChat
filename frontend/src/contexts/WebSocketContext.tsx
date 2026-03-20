@@ -4,6 +4,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getWsOrigin } from '@/lib/serverOrigin';
 
 interface WebSocketContextType {
   socket: Socket | null;
@@ -36,7 +37,7 @@ export function WebSocketProvider({ children, userId, token }: WebSocketProvider
       return;
     }
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
+    const wsUrl = getWsOrigin();
 
     const s = io(wsUrl, {
       auth: { userId, token },

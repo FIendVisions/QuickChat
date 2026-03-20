@@ -1,8 +1,7 @@
 // frontend/src/services/api/message.api.ts
 
 import { Channel } from '@/types/channel.types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getApiOrigin } from '@/lib/serverOrigin';
 
 /**
  * 获取认证头（如果有的话）
@@ -50,7 +49,7 @@ export const messageApi = {
     },
   ): Promise<any> {
     try {
-      const response = await fetch(`${API_URL}/channels/${channelId}/messages`, {
+      const response = await fetch(`${getApiOrigin()}/channels/${channelId}/messages`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -86,7 +85,7 @@ export const messageApi = {
     hasMore: boolean;
   }> {
     const response = await fetch(
-      `${API_URL}/channels/${channelId}/messages?page=${page}&pageSize=${pageSize}`,
+      `${getApiOrigin()}/channels/${channelId}/messages?page=${page}&pageSize=${pageSize}`,
       { headers: getAuthHeaders() }
     );
 

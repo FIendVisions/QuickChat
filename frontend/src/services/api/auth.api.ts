@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getApiOrigin } from '@/lib/serverOrigin';
 
 export interface AuthResponse {
   access_token: string;
@@ -20,7 +20,7 @@ async function handleResponse(response: Response): Promise<AuthResponse> {
 
 export const authApi = {
   async register(username: string, email: string, password: string): Promise<AuthResponse> {
-    const response = await fetch(`${API_URL}/auth/register`, {
+    const response = await fetch(`${getApiOrigin()}/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, email, password }),
@@ -29,7 +29,7 @@ export const authApi = {
   },
 
   async login(username: string, password: string): Promise<AuthResponse> {
-    const response = await fetch(`${API_URL}/auth/login`, {
+    const response = await fetch(`${getApiOrigin()}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),

@@ -1,8 +1,7 @@
 // frontend/src/services/api/channel.api.ts
 
 import { Channel } from '@/types/channel.types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+import { getApiOrigin } from '@/lib/serverOrigin';
 
 function getAuthHeaders(): HeadersInit {
   const headers: HeadersInit = {
@@ -32,7 +31,7 @@ export const channelApi = {
     const params = new URLSearchParams();
     if (userId) params.set('userId', userId);
     if (options?.myOnly) params.set('myOnly', 'true');
-    const url = `${API_URL}/channels${params.toString() ? '?' + params.toString() : ''}`;
+    const url = `${getApiOrigin()}/channels${params.toString() ? '?' + params.toString() : ''}`;
     const response = await fetch(url, { headers: getAuthHeaders() });
     const data = await handleResponse(response);
     return (data.channels || []).map((ch: any) => ({
@@ -42,7 +41,7 @@ export const channelApi = {
   },
 
   async getById(id: string): Promise<Channel> {
-    const response = await fetch(`${API_URL}/channels/${id}`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${id}`, {
       headers: getAuthHeaders(),
     });
     const data = await handleResponse(response);
@@ -57,7 +56,7 @@ export const channelApi = {
     userId: string;
     username: string;
   }): Promise<Channel> {
-    const response = await fetch(`${API_URL}/channels`, {
+    const response = await fetch(`${getApiOrigin()}/channels`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify(data),
@@ -72,7 +71,7 @@ export const channelApi = {
   async join(id: string, password?: string): Promise<any> {
     const userId = localStorage.getItem('userId') || '';
     const username = localStorage.getItem('username') || '';
-    const response = await fetch(`${API_URL}/channels/${id}/join`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${id}/join`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({ userId, username, password }),
@@ -82,7 +81,7 @@ export const channelApi = {
 
   async update(id: string, data: { name?: string; description?: string; password?: string; type?: string }): Promise<Channel> {
     const userId = localStorage.getItem('userId') || '';
-    const response = await fetch(`${API_URL}/channels/${id}`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${id}`, {
       method: 'PATCH',
       headers: getAuthHeaders(),
       body: JSON.stringify({ ...data, userId }),
@@ -92,7 +91,7 @@ export const channelApi = {
 
   async delete(id: string): Promise<void> {
     const userId = localStorage.getItem('userId') || '';
-    const response = await fetch(`${API_URL}/channels/${id}/delete`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${id}/delete`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({ userId }),
@@ -105,7 +104,7 @@ export const channelApi = {
 
   async leave(id: string): Promise<void> {
     const userId = localStorage.getItem('userId') || '';
-    const response = await fetch(`${API_URL}/channels/${id}/leave`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${id}/leave`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({ userId }),
@@ -116,7 +115,7 @@ export const channelApi = {
   },
 
   async getMembers(channelId: string): Promise<any[]> {
-    const response = await fetch(`${API_URL}/channels/${channelId}/members`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${channelId}/members`, {
       headers: getAuthHeaders(),
     });
     return handleResponse(response);
@@ -133,7 +132,7 @@ export const channelApi = {
     const headers: HeadersInit = {};
     const token = localStorage.getItem('token');
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const response = await fetch(`${API_URL}/channels/${channelId}/upload`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${channelId}/upload`, {
       method: 'POST',
       headers,
       body: form,
@@ -151,7 +150,7 @@ export const channelApi = {
     hasMore: boolean;
   }> {
     const response = await fetch(
-      `${API_URL}/channels/${channelId}/messages?page=${page}&pageSize=${pageSize}`,
+      `${getApiOrigin()}/channels/${channelId}/messages?page=${page}&pageSize=${pageSize}`,
       { headers: getAuthHeaders() }
     );
     if (!response.ok) {
@@ -164,7 +163,7 @@ export const channelApi = {
   async getPins(channelId: string): Promise<{
     pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
   }> {
-    const response = await fetch(`${API_URL}/channels/${channelId}/pins`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${channelId}/pins`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -180,7 +179,7 @@ export const channelApi = {
   ): Promise<{
     pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
   }> {
-    const response = await fetch(`${API_URL}/channels/${channelId}/pins`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${channelId}/pins`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({ messageId, userId }),
@@ -195,7 +194,7 @@ export const channelApi = {
   ): Promise<{
     pins: { messageId: string; pinnedByUserId: string; pinnedByUsername: string; createdAt: string }[];
   }> {
-    const response = await fetch(`${API_URL}/channels/${channelId}/pins/remove`, {
+    const response = await fetch(`${getApiOrigin()}/channels/${channelId}/pins/remove`, {
       method: 'POST',
       headers: getAuthHeaders(),
       body: JSON.stringify({ messageId, userId }),

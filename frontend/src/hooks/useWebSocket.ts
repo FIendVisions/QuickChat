@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { getWsOrigin } from '@/lib/serverOrigin';
 
 interface UseWebSocketOptions {
   userId: string;
@@ -22,7 +23,7 @@ export function useWebSocket({ userId, token }: UseWebSocketOptions): WebSocketR
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:3001';
+    const wsUrl = getWsOrigin();
 
     // 使用 Socket.IO 客户端
     const socket = io(wsUrl, {
