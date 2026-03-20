@@ -8,8 +8,10 @@ import { LiveWatchPlayer } from '@/components/live/LiveWatchPlayer';
 import { DanmakuChatPanel } from '@/components/live/DanmakuChatPanel';
 import { useLiveWatch } from '@/contexts/LiveWatchContext';
 import type { Channel } from '@/types/channel.types';
+import { ChannelKind } from '@/types/channel.types';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
 import type { EveryonePin } from '@/types/pin.types';
+import { VoiceChannelMain } from './VoiceChannelMain';
 
 export interface ChatMainStackProps {
   channel: Channel;
@@ -70,13 +72,20 @@ export function ChatMainStack({
     target.channelId === channel.id &&
     (target.screen || target.camera);
 
+  const kind = channel.kind ?? ChannelKind.TEXT;
+  const channelMark =
+    kind === ChannelKind.VOICE ? '🔊' : kind === ChannelKind.LIVE ? '📡' : channel.type === 'PUBLIC' ? '#' : '🔒';
+
   const titleBar = (
     <div className="flex h-10 shrink-0 items-center justify-between border-b border-border-color bg-bg-tertiary px-4 shadow-sm">
       <div className="flex min-w-0 items-center gap-2">
-        <span className="text-base text-text-muted">
-          {channel.type === 'PUBLIC' ? '#' : '🔒'}
-        </span>
+        <span className="text-base text-text-muted">{channelMark}</span>
         <h2 className="truncate text-sm font-semibold text-text-normal">{channel.name}</h2>
+        {kind === ChannelKind.LIVE && !liveActive && (
+          <span className="shrink-0 rounded bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-rose-400">
+            直播频道
+          </span>
+        )}
         {liveActive && (
           <span className="shrink-0 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
             直播中
@@ -142,6 +151,35 @@ export function ChatMainStack({
           </div>
           <ChannelMembers channelId={channel.id} userId={user.id} isOwner={isOwner} />
         </div>
+      </>
+    );
+  }
+
+  if (kind === ChannelKind.VOICE) {
+    return (
+      <>
+        {titleBar}
+        <VoiceChannelMain
+          channel={channel}
+          user={user}
+          token={token}
+          isOwner={isOwner}
+          messageListRef={messageListRef}
+          replyTo={replyTo}
+          setReplyTo={setReplyTo}
+          personalPinIds={personalPinIds}
+          everyonePins={everyonePins}
+          onTogglePersonalPin={onTogglePersonalPin}
+          onToggleEveryonePin={onToggleEveryonePin}
+          onUnpinEveryone={onUnpinEveryone}
+          onEveryonePinsRefresh={onEveryonePinsRefresh}
+          onMessageSend={onMessageSend}
+          chatDragOver={chatDragOver}
+          onDragEnter={onDragEnter}
+          onDragLeave={onDragLeave}
+          onDragOverCapture={onDragOverCapture}
+          onDropCapture={onDropCapture}
+        />
       </>
     );
   }

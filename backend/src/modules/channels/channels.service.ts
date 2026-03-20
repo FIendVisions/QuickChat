@@ -9,7 +9,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Channel, ChannelMember, User } from '@prisma/client';
-import { ChannelType } from '../../common/types';
+import { ChannelType, ChannelKind } from '../../common/types';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service';
 import { WebsocketGateway } from '../../gateway/websocket.gateway';
@@ -42,27 +42,9 @@ export class ChannelsService {
    * 获取频道列表（分页 + 筛选）
    */
   async findAll(query: QueryChannelDto): Promise<{ channels: ChannelListItem[]; total: number }> {
-    const { type, userId, myOnly, page = 1, pageSize = 50 } = query;
+    const { type, userId, myOnly, serverId, page = 1, pageSize = 50 } = query;
     const skip = (page - 1) * pageSize;
     const isMyOnly = myOnly === 'true';
-
-    const where: any = {};
-    if (type) {
-      where.type = type;
-    }
-
-    if (isMyOnly && userId) {
-      where.members = { some: { userId } };
-    } else if (userId && (!type || type === ChannelType.PRIVATE)) {
-      where.OR = [
-        { type: ChannelType.PUBLIC },
-        {
-          type: ChannelType.PRIVATE,
-          members: { some: { userId } },
-        },
-      ];
-      delete where.type;
-    }
 
     const channelInclude = {
       owner: {
@@ -72,6 +54,52 @@ export class ChannelsService {
         select: { members: true },
       },
     };
+
+    let where: any;
+
+    if (serverId) {
+      if (!userId) {
+        return { channels: [], total: 0 };
+      }
+      const serverMember = await this.prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId, userId } },
+      });
+      if (!serverMember) {
+        return { channels: [], total: 0 };
+      }
+      where = { serverId };
+      if (type) {
+        where.type = type;
+      }
+    } else if (!userId) {
+      where = { serverId: null, type: ChannelType.PUBLIC };
+    } else {
+      where = { serverId: null };
+      if (type) {
+        where.type = type;
+      }
+
+      if (isMyOnly && userId) {
+        where.members = { some: { userId } };
+      } else if (!type || type === ChannelType.PRIVATE) {
+        if (where.type !== undefined) {
+          delete where.type;
+        }
+        where.AND = [
+          { serverId: null },
+          {
+            OR: [
+              { type: ChannelType.PUBLIC },
+              {
+                type: ChannelType.PRIVATE,
+                members: { some: { userId } },
+              },
+            ],
+          },
+        ];
+        delete where.serverId;
+      }
+    }
 
     const [channels, total] = await Promise.all([
       this.prisma.channel.findMany({
@@ -88,6 +116,8 @@ export class ChannelsService {
       id: channel.id,
       name: channel.name,
       type: channel.type as ChannelType,
+      kind: (channel.kind || ChannelKind.TEXT) as ChannelKind,
+      serverId: channel.serverId,
       description: channel.description,
       ownerId: channel.ownerId,
       owner: {
@@ -101,7 +131,7 @@ export class ChannelsService {
       updatedAt: channel.updatedAt,
     }));
 
-    this.logger.log(`Found ${total} channels (userId filter: ${userId || 'none'})`);
+    this.logger.log(`Found ${total} channels (userId filter: ${userId || 'none'}, serverId: ${serverId || 'none'})`);
     return { channels: channelList, total };
   }
 
@@ -146,6 +176,21 @@ export class ChannelsService {
     // 确保创建者在数据库中存在
     await this.ensureUserExists(userId, dto.username);
 
+    const kind = dto.kind ?? ChannelKind.TEXT;
+    if (!Object.values(ChannelKind).includes(kind)) {
+      throw new BadRequestException('Invalid channel kind');
+    }
+
+    let serverId: string | null = dto.serverId ?? null;
+    if (serverId) {
+      const sm = await this.prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId, userId } },
+      });
+      if (!sm) {
+        throw new ForbiddenException('You are not a member of this server');
+      }
+    }
+
     // 加密密码（两种类型都可以设置密码）
     let hashedPassword: string | undefined;
     if (dto.password) {
@@ -157,6 +202,8 @@ export class ChannelsService {
       data: {
         name: dto.name,
         type: dto.type,
+        kind,
+        serverId,
         ownerId: userId,
         description: dto.description,
         maxParticipants: dto.type === ChannelType.PRIVATE ? (dto.maxParticipants || 50) : null,
@@ -290,6 +337,15 @@ export class ChannelsService {
       throw new NotFoundException('Channel not found');
     }
 
+    if (channel.serverId) {
+      const sm = await this.prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId: channel.serverId, userId } },
+      });
+      if (!sm) {
+        throw new ForbiddenException('请先加入对应的服务器，再进入频道');
+      }
+    }
+
     // 检查是否已在频道中
     const existingMember = await this.prisma.channelMember.findUnique({
       where: {
@@ -333,12 +389,16 @@ export class ChannelsService {
       timestamp: new Date().toISOString(),
     });
 
+    const chKind = (channel.kind || ChannelKind.TEXT) as ChannelKind;
     return {
       success: true,
       channelId: channel.id,
       channelName: channel.name,
       isPrivate: channel.type === ChannelType.PRIVATE,
-      canSpeak: channel.type === ChannelType.PRIVATE, // 私有频道可以语音
+      canSpeak:
+        chKind === ChannelKind.VOICE ||
+        chKind === ChannelKind.LIVE ||
+        channel.type === ChannelType.PRIVATE,
       participantCount: channel._count.members + 1,
     };
   }

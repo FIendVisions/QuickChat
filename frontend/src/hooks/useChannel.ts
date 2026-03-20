@@ -6,6 +6,8 @@ import { channelApi } from '@/services/api/channel.api';
 
 interface UseChannelOptions {
   myOnly?: boolean;
+  /** 若设置则只拉取该服务器下频道（需 userId） */
+  serverId?: string | null;
 }
 
 interface UseChannelResult {
@@ -22,13 +24,17 @@ export function useChannel(userId?: string, options?: UseChannelOptions): UseCha
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const myOnly = options?.myOnly ?? false;
+  const serverId = options?.serverId;
 
   const fetchChannels = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const channelsData = await channelApi.getAll(userId, { myOnly });
+      const channelsData = await channelApi.getAll(userId, {
+        myOnly: serverId ? false : myOnly,
+        serverId: serverId || undefined,
+      });
       setChannels(channelsData);
     } catch (err: any) {
       console.error('Failed to fetch channels:', err);
@@ -37,7 +43,7 @@ export function useChannel(userId?: string, options?: UseChannelOptions): UseCha
     } finally {
       setIsLoading(false);
     }
-  }, [userId, myOnly]);
+  }, [userId, myOnly, serverId]);
 
   useEffect(() => {
     fetchChannels();

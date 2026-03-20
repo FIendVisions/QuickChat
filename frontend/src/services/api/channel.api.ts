@@ -27,10 +27,14 @@ export const channelApi = {
   /**
    * 获取所有频道（传入 userId 时，私密频道只返回用户参与的）
    */
-  async getAll(userId?: string, options?: { myOnly?: boolean }): Promise<Channel[]> {
+  async getAll(
+    userId?: string,
+    options?: { myOnly?: boolean; serverId?: string | null },
+  ): Promise<Channel[]> {
     const params = new URLSearchParams();
     if (userId) params.set('userId', userId);
     if (options?.myOnly) params.set('myOnly', 'true');
+    if (options?.serverId) params.set('serverId', options.serverId);
     const url = `${getApiOrigin()}/channels${params.toString() ? '?' + params.toString() : ''}`;
     const response = await fetch(url, { headers: getAuthHeaders() });
     const data = await handleResponse(response);
@@ -51,6 +55,8 @@ export const channelApi = {
   async create(data: {
     name: string;
     type: 'PUBLIC' | 'PRIVATE';
+    kind?: 'TEXT' | 'VOICE' | 'LIVE';
+    serverId?: string;
     description?: string;
     password?: string;
     userId: string;

@@ -1,22 +1,30 @@
-// frontend/src/components/channel/CreateChannelModal.tsx
-
 'use client';
 
 import { useState } from 'react';
-import { Globe, Lock, X, Eye, EyeOff } from 'lucide-react';
+import { Globe, Lock, X, Eye, EyeOff, Hash, Mic, Video } from 'lucide-react';
 
 interface CreateChannelModalProps {
   onClose: () => void;
+  /** 为 true 时表示必须在服务器上下文中创建（应传入 serverId） */
+  requireServer?: boolean;
+  serverId?: string;
   onCreate: (data: {
     name: string;
     type: 'public' | 'private';
+    kind: 'TEXT' | 'VOICE' | 'LIVE';
     description?: string;
     password?: string;
   }) => Promise<void>;
 }
 
-export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProps) {
+export function CreateChannelModal({
+  onClose,
+  onCreate,
+  requireServer,
+  serverId,
+}: CreateChannelModalProps) {
   const [name, setName] = useState('');
+  const [kind, setKind] = useState<'TEXT' | 'VOICE' | 'LIVE'>('TEXT');
   const [type, setType] = useState<'public' | 'private'>('public');
   const [description, setDescription] = useState('');
   const [password, setPassword] = useState('');
@@ -28,12 +36,16 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (requireServer && !serverId) {
+      setError('请先选择一个服务器');
+      return;
+    }
     if (!name.trim()) {
       setError('频道名称不能为空');
       return;
     }
-    if (name.length > 32) {
-      setError('频道名称最多 32 个字符');
+    if (name.length > 50) {
+      setError('频道名称最多 50 个字符');
       return;
     }
     if (usePassword && password.length < 4) {
@@ -48,57 +60,101 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
       await onCreate({
         name: name.trim(),
         type,
+        kind,
         description: description.trim() || undefined,
         password: usePassword ? password : undefined,
       });
       onClose();
-    } catch (err: any) {
-      setError(err.message || '创建频道失败');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : '创建频道失败');
     } finally {
       setIsCreating(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-bg-secondary rounded-lg shadow-xl w-full max-w-md mx-4">
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between p-4 border-b border-border-color">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="mx-4 w-full max-w-md rounded-lg bg-bg-secondary shadow-xl">
+        <div className="flex items-center justify-between border-b border-border-color p-4">
           <h2 className="text-lg font-semibold text-text-normal">创建频道</h2>
           <button
+            type="button"
             onClick={onClose}
-            className="text-text-muted hover:text-text-normal transition-colors"
+            className="text-text-muted transition-colors hover:text-text-normal"
             disabled={isCreating}
           >
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-4 space-y-4">
-          {/* 频道名称 */}
+        <form onSubmit={handleSubmit} className="space-y-4 p-4">
           <div>
-            <label className="block text-sm font-medium text-text-normal mb-1">频道名称</label>
+            <label className="mb-1 block text-sm font-medium text-text-normal">频道形态</label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setKind('TEXT')}
+                className={`flex flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
+                  kind === 'TEXT'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
+                }`}
+                disabled={isCreating}
+              >
+                <Hash size={20} />
+                <span className="text-xs font-medium">文字</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind('VOICE')}
+                className={`flex flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
+                  kind === 'VOICE'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
+                }`}
+                disabled={isCreating}
+              >
+                <Mic size={20} />
+                <span className="text-xs font-medium">语音</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind('LIVE')}
+                className={`flex flex-col items-center gap-1 rounded-lg border-2 p-2 transition-all ${
+                  kind === 'LIVE'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
+                }`}
+                disabled={isCreating}
+              >
+                <Video size={20} />
+                <span className="text-xs font-medium">直播</span>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-text-normal">频道名称</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="给频道起个名字"
-              className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-md text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-md border border-border-color bg-bg-tertiary px-3 py-2 text-text-normal placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
               disabled={isCreating}
-              maxLength={32}
+              maxLength={50}
               autoFocus
             />
-            <p className="mt-1 text-xs text-text-muted text-right">{name.length}/32</p>
+            <p className="mt-1 text-right text-xs text-text-muted">{name.length}/50</p>
           </div>
 
-          {/* 频道类型 */}
           <div>
-            <label className="block text-sm font-medium text-text-normal mb-2">频道类型</label>
+            <label className="mb-2 block text-sm font-medium text-text-normal">可见性</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => setType('public')}
-                className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all ${
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all ${
                   type === 'public'
                     ? 'border-success bg-success/10 text-success'
                     : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
@@ -107,15 +163,15 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
               >
                 <Globe size={24} />
                 <div className="text-center">
-                  <div className="text-sm font-medium">公开频道</div>
-                  <div className="text-[10px] mt-0.5 opacity-70">所有人可见并加入</div>
+                  <div className="text-sm font-medium">公开</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">可被全站发现（无服务器时）</div>
                 </div>
               </button>
 
               <button
                 type="button"
                 onClick={() => setType('private')}
-                className={`flex flex-col items-center gap-2 p-3 rounded-lg border-2 transition-all ${
+                className={`flex flex-col items-center gap-2 rounded-lg border-2 p-3 transition-all ${
                   type === 'private'
                     ? 'border-primary bg-primary/10 text-primary'
                     : 'border-border-color bg-bg-tertiary text-text-muted hover:bg-bg-hover'
@@ -124,16 +180,15 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
               >
                 <Lock size={24} />
                 <div className="text-center">
-                  <div className="text-sm font-medium">私密频道</div>
-                  <div className="text-[10px] mt-0.5 opacity-70">仅通过频道ID加入</div>
+                  <div className="text-sm font-medium">私密</div>
+                  <div className="mt-0.5 text-[10px] opacity-70">需邀请或频道 ID</div>
                 </div>
               </button>
             </div>
           </div>
 
-          {/* 密码设置（两种类型都可以） */}
           <div>
-            <div className="flex items-center gap-2 mb-2">
+            <div className="mb-2 flex items-center gap-2">
               <input
                 type="checkbox"
                 id="usePassword"
@@ -143,9 +198,9 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
                   if (!e.target.checked) setPassword('');
                 }}
                 disabled={isCreating}
-                className="w-4 h-4 rounded border-border-color bg-bg-tertiary text-primary focus:ring-2 focus:ring-primary"
+                className="h-4 w-4 rounded border-border-color bg-bg-tertiary text-primary focus:ring-2 focus:ring-primary"
               />
-              <label htmlFor="usePassword" className="text-sm text-text-normal cursor-pointer">
+              <label htmlFor="usePassword" className="cursor-pointer text-sm text-text-normal">
                 设置频道密码
               </label>
             </div>
@@ -156,7 +211,7 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="设置加入密码（至少4位）"
-                  className="w-full px-3 py-2 pr-10 bg-bg-tertiary border border-border-color rounded-md text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full rounded-md border border-border-color bg-bg-tertiary px-3 py-2 pr-10 text-text-normal placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
                   disabled={isCreating}
                   minLength={4}
                 />
@@ -171,50 +226,48 @@ export function CreateChannelModal({ onClose, onCreate }: CreateChannelModalProp
             )}
           </div>
 
-          {/* 描述 */}
           <div>
-            <label className="block text-sm font-medium text-text-normal mb-1">描述（可选）</label>
+            <label className="mb-1 block text-sm font-medium text-text-normal">描述（可选）</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="这个频道是做什么的？"
               rows={2}
-              className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-md text-text-normal placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+              className="w-full resize-none rounded-md border border-border-color bg-bg-tertiary px-3 py-2 text-text-normal placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary"
               disabled={isCreating}
               maxLength={100}
             />
           </div>
 
-          {/* 类型说明 */}
-          <div className="p-3 bg-bg-tertiary rounded-md text-xs text-text-muted">
-            {type === 'public' ? (
-              <p>公开频道创建后会显示在所有用户的「公开频道」列表中，任何人都可以看到并加入。</p>
+          <div className="rounded-md bg-bg-tertiary p-3 text-xs text-text-muted">
+            {requireServer ? (
+              <p>频道将创建在当前服务器内；服务器成员可见列表中的频道（需先加入服务器）。</p>
+            ) : type === 'public' ? (
+              <p>无服务器时，公开频道会出现在全站「公开频道」列表中。</p>
             ) : (
-              <p>私密频道创建后仅对你可见，其他人需要输入频道ID才能加入。创建成功后可以复制频道ID分享给好友。</p>
+              <p>私密频道主要对你可见，他人需使用频道 ID 加入。</p>
             )}
           </div>
 
-          {/* 错误提示 */}
           {error && (
-            <div className="p-3 bg-danger/10 border border-danger/50 rounded-md">
+            <div className="rounded-md border border-danger/50 bg-danger/10 p-3">
               <p className="text-sm text-danger">{error}</p>
             </div>
           )}
 
-          {/* 按钮 */}
           <div className="flex gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
               disabled={isCreating}
-              className="flex-1 px-4 py-2 bg-bg-tertiary text-text-normal rounded-md hover:bg-bg-hover transition-colors disabled:opacity-50"
+              className="flex-1 rounded-md bg-bg-tertiary px-4 py-2 text-text-normal transition-colors hover:bg-bg-hover disabled:opacity-50"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={isCreating}
-              className="flex-1 px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="flex-1 rounded-md bg-primary px-4 py-2 text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
             >
               {isCreating ? '创建中...' : '创建频道'}
             </button>

@@ -24,13 +24,52 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  ownedChannels       Channel[]       @relation("ChannelOwner")
+  ownedChannels       Channel[]        @relation("ChannelOwner")
+  ownedServers        Server[]         @relation("ServerOwner")
   channelMemberships  ChannelMember[]
+  serverMemberships   ServerMember[]
   messages            Message[]
-  channelPinsCreated  ChannelPin[]    @relation("ChannelPinAuthor")
+  channelPinsCreated  ChannelPin[]     @relation("ChannelPinAuthor")
 
   @@map("users")
   @@index([status])
+}
+
+// ============================================================
+// 服务器（类似 Discord Guild）
+// ============================================================
+
+model Server {
+  id         String   @id @default(uuid())
+  name       String
+  icon       String?
+  ownerId    String
+  inviteCode String   @unique
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  owner    User           @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members  ServerMember[]
+  channels Channel[]
+
+  @@index([ownerId])
+  @@map("servers")
+}
+
+model ServerMember {
+  id        String   @id @default(uuid())
+  serverId  String
+  userId    String
+  role      String   @default("MEMBER")
+  joinedAt  DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, userId])
+  @@index([serverId])
+  @@index([userId])
+  @@map("server_members")
 }
 
 // ============================================================
@@ -41,7 +80,10 @@ model Channel {
   id              String        @id @default(uuid())
   name            String
   type            String
+  // kind: TEXT | VOICE | LIVE
+  kind            String        @default("TEXT")
   ownerId         String
+  serverId        String?
   description     String?
   maxParticipants Int?
   password        String?
@@ -49,12 +91,15 @@ model Channel {
   updatedAt       DateTime      @updatedAt
 
   owner    User            @relation("ChannelOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  server   Server?         @relation(fields: [serverId], references: [id], onDelete: Cascade)
   members  ChannelMember[]
   messages Message[]
   pins     ChannelPin[]
 
   @@index([type])
   @@index([ownerId])
+  @@index([serverId])
+  @@index([kind])
   @@map("channels")
 }
 

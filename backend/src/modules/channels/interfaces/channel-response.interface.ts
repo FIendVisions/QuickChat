@@ -1,7 +1,7 @@
 // backend/src/modules/channels/interfaces/channel-response.interface.ts
 
 import { Channel, User } from '@prisma/client';
-import { ChannelType } from '../../../common/types';
+import { ChannelType, ChannelKind } from '../../../common/types';
 
 /**
  * 频道详细信息（包含参与人数）
@@ -22,6 +22,8 @@ export interface ChannelListItem {
   id: string;
   name: string;
   type: ChannelType;
+  kind: ChannelKind;
+  serverId?: string | null;
   description?: string;
   ownerId: string;
   owner: {

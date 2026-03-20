@@ -19,6 +19,19 @@ export enum ChannelType {
   PRIVATE = 'PRIVATE',
 }
 
+/** 频道形态：文字 / 语音 / 直播 */
+export enum ChannelKind {
+  TEXT = 'TEXT',
+  VOICE = 'VOICE',
+  LIVE = 'LIVE',
+}
+
+export enum ServerMemberRole {
+  OWNER = 'OWNER',
+  ADMIN = 'ADMIN',
+  MEMBER = 'MEMBER',
+}
+
 export enum MessageType {
   TEXT = 'TEXT',
   SYSTEM = 'SYSTEM',

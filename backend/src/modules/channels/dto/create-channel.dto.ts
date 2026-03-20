@@ -2,7 +2,7 @@
 
 import { IsString, IsEnum, IsOptional, IsNumber, Min, Max, Length, IsNotEmpty } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ChannelType } from '../../../common/types';
+import { ChannelType, ChannelKind } from '../../../common/types';
 
 export class CreateChannelDto {
   @ApiProperty({ description: '频道名称', minLength: 2, maxLength: 50 })
@@ -43,4 +43,14 @@ export class CreateChannelDto {
   @IsString()
   @Length(0, 100)
   password?: string;
+
+  @ApiPropertyOptional({ description: '所属服务器 ID（在服务器内创建时必填）' })
+  @IsOptional()
+  @IsString()
+  serverId?: string;
+
+  @ApiPropertyOptional({ description: '频道形态', enum: ChannelKind })
+  @IsOptional()
+  @IsEnum(ChannelKind)
+  kind?: ChannelKind;
 }

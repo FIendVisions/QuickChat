@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './database/prisma.module';
 import { ChannelsModule } from './modules/channels/channels.module';
+import { ServersModule } from './modules/servers/servers.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { GatewayModule } from './gateway/gateway.module';
 
@@ -14,6 +15,7 @@ import { GatewayModule } from './gateway/gateway.module';
     }),
     PrismaModule,
     AuthModule,
+    ServersModule,
     ChannelsModule,
     GatewayModule,
   ],

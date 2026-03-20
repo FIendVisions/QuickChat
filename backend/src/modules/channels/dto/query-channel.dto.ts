@@ -32,4 +32,9 @@ export class QueryChannelDto {
   @Type(() => Number)
   @IsInt()
   pageSize?: number = 50;
+
+  @ApiPropertyOptional({ description: '按服务器筛选频道（需配合 userId 校验成员）' })
+  @IsOptional()
+  @IsString()
+  serverId?: string;
 }

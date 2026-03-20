@@ -4,7 +4,11 @@ import { useState, useEffect, useRef, useCallback, type DragEvent } from 'react'
 import { TopBar } from '@/components/layout/TopBar';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { UserSelfPanel } from '@/components/layout/UserSelfPanel';
-import { ChannelList } from '@/components/channel/ChannelList';
+import { ServerRail } from '@/components/server/ServerRail';
+import { ServerChannelSidebar } from '@/components/channel/ServerChannelSidebar';
+import { CreateServerModal } from '@/components/server/CreateServerModal';
+import { JoinServerModal } from '@/components/server/JoinServerModal';
+import { useServers } from '@/hooks/useServers';
 import { MessageListRef } from '@/components/message/MessageList';
 import { ChannelSettingsModal } from '@/components/channel/ChannelSettingsModal';
 import { PublicChannelBrowser } from '@/components/channel/PublicChannelBrowser';
@@ -12,7 +16,8 @@ import { AuthModal } from '@/components/auth/AuthModal';
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
 import { LiveWatchProvider } from '@/contexts/LiveWatchContext';
 import { ChatMainStack } from '@/components/chat/ChatMainStack';
-import { Channel } from '@/types/channel.types';
+import { Channel, ChannelKind } from '@/types/channel.types';
+import { serverApi } from '@/services/api/server.api';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
 import { resolveUploadUrl } from '@/lib/mediaUrl';
@@ -27,10 +32,15 @@ export default function HomePage() {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+  const [selectedServerId, setSelectedServerId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showCreateServerModal, setShowCreateServerModal] = useState(false);
+  const [showJoinServerModal, setShowJoinServerModal] = useState(false);
   const [browsingPublicChannels, setBrowsingPublicChannels] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { servers, refetch: refetchServers } = useServers(user?.id);
+
   const messageListRef = useRef<MessageListRef>(null);
   const chatDragDepth = useRef(0);
   const [chatDragOver, setChatDragOver] = useState(false);
@@ -40,6 +50,24 @@ export default function HomePage() {
 
   const isOfficialChannel = selectedChannel?.id === 'public-official';
   const isOwner = selectedChannel?.ownerId === user?.id;
+
+  const selectedServer = selectedServerId
+    ? servers.find((s) => s.id === selectedServerId) ?? null
+    : null;
+
+  useEffect(() => {
+    const onInvalid = (e: Event) => {
+      const ce = e as CustomEvent<{ serverId?: string }>;
+      const sid = ce.detail?.serverId;
+      if (!sid) return;
+      if (selectedServerId === sid) {
+        setSelectedServerId(null);
+      }
+      setSelectedChannel((ch) => (ch?.serverId === sid ? null : ch));
+    };
+    window.addEventListener('quickchat:currentServerInvalid', onInvalid);
+    return () => window.removeEventListener('quickchat:currentServerInvalid', onInvalid);
+  }, [selectedServerId]);
 
   const sendChannelPayload = useCallback(
     async (payload: SendMessagePayload) => {
@@ -235,6 +263,7 @@ export default function HomePage() {
           id: 'public-official',
           name: '公共频道',
           type: 'PUBLIC' as any,
+          kind: ChannelKind.TEXT,
           description: '官方频道 - 所有用户自动加入',
           ownerId: 'system',
           participantCount: 0,
@@ -242,6 +271,7 @@ export default function HomePage() {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
+        setSelectedServerId(null);
       }
     } catch (err) {
       console.error('Failed to load auth state:', err);
@@ -262,9 +292,11 @@ export default function HomePage() {
       setToken(access_token);
       setSelectedChannel({
         id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
+        kind: ChannelKind.TEXT,
         description: '官方频道', ownerId: 'system', participantCount: 0,
         hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
+      setSelectedServerId(null);
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -285,9 +317,11 @@ export default function HomePage() {
       setToken(access_token);
       setSelectedChannel({
         id: 'public-official', name: '公共频道', type: 'PUBLIC' as any,
+        kind: ChannelKind.TEXT,
         description: '官方频道', ownerId: 'system', participantCount: 0,
         hasPassword: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       });
+      setSelectedServerId(null);
       setShowAuthModal(false);
       setError(null);
     } catch (err: any) {
@@ -304,6 +338,7 @@ export default function HomePage() {
     setUser(null);
     setToken(null);
     setSelectedChannel(null);
+    setSelectedServerId(null);
     setBrowsingPublicChannels(false);
     setError(null);
   };
@@ -311,8 +346,14 @@ export default function HomePage() {
   const handleChannelSelect = async (channel: Channel) => {
     setBrowsingPublicChannels(false);
     if (channel.id === 'public-official') {
+      setSelectedServerId(null);
       setSelectedChannel(channel);
       return;
+    }
+    if (channel.serverId) {
+      setSelectedServerId(channel.serverId);
+    } else {
+      setSelectedServerId(null);
     }
     try {
       const fresh = await channelApi.getById(channel.id);
@@ -337,6 +378,37 @@ export default function HomePage() {
     setSelectedChannel(null);
     window.dispatchEvent(new CustomEvent('channelsChanged'));
   };
+
+  const handleCreateServerSubmit = useCallback(
+    async (data: { name: string; icon?: string }) => {
+      if (!user) return;
+      const created = await serverApi.create({
+        name: data.name,
+        icon: data.icon,
+        userId: user.id,
+        username: user.username,
+      });
+      await refetchServers();
+      setSelectedServerId(created.id);
+      setSelectedChannel(null);
+    },
+    [user, refetchServers],
+  );
+
+  const handleJoinServerSubmit = useCallback(
+    async (inviteCode: string) => {
+      if (!user) return;
+      const joined = await serverApi.joinByInvite({
+        inviteCode,
+        userId: user.id,
+        username: user.username,
+      });
+      await refetchServers();
+      setSelectedServerId(joined.id);
+      setSelectedChannel(null);
+    },
+    [user, refetchServers],
+  );
 
   if (isLoading) {
     return (
@@ -384,14 +456,30 @@ export default function HomePage() {
         />
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* 左侧边栏：频道列表 + 左下角用户信息 / 媒体控制 */}
-          <div className="flex w-60 min-h-0 min-w-0 flex-col border-r border-border-color bg-bg-secondary">
+          <ServerRail
+            servers={servers}
+            selectedServerId={selectedServerId}
+            homeSelected={selectedServerId === null}
+            onSelectHome={() => {
+              setSelectedServerId(null);
+              setBrowsingPublicChannels(false);
+            }}
+            onSelectServer={(s) => {
+              setSelectedServerId(s.id);
+              setBrowsingPublicChannels(false);
+              setSelectedChannel(null);
+            }}
+            onAddServer={() => setShowCreateServerModal(true)}
+            onJoinServer={() => setShowJoinServerModal(true)}
+          />
+
+          <div className="flex w-[240px] min-h-0 min-w-0 shrink-0 flex-col border-r border-black/30">
             <div className="min-h-0 flex-1 overflow-hidden">
-              <ChannelList
+              <ServerChannelSidebar
                 userId={user.id}
-                token={token || undefined}
+                server={selectedServer}
                 onChannelSelect={handleChannelSelect}
-                onBrowsePublicChannels={() => {
+                onBrowsePublic={() => {
                   setBrowsingPublicChannels(true);
                   setSelectedChannel(null);
                 }}
@@ -405,9 +493,8 @@ export default function HomePage() {
             />
           </div>
 
-          {/* 中间+右侧区域 */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-primary">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {browsingPublicChannels ? (
                 <PublicChannelBrowser
                   userId={user.id}
@@ -456,6 +543,19 @@ export default function HomePage() {
           </div>
         </div>
       </div>
+
+      {showCreateServerModal && user && (
+        <CreateServerModal
+          onClose={() => setShowCreateServerModal(false)}
+          onCreate={handleCreateServerSubmit}
+        />
+      )}
+      {showJoinServerModal && user && (
+        <JoinServerModal
+          onClose={() => setShowJoinServerModal(false)}
+          onJoin={handleJoinServerSubmit}
+        />
+      )}
 
       <StatusBar />
 

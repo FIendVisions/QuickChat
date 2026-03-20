@@ -1,11 +1,18 @@
 // frontend/src/types/channel.types.ts
 
 /**
- * 频道类型
+ * 频道可见性（公开 / 私密）
  */
 export enum ChannelType {
   PUBLIC = 'PUBLIC',
   PRIVATE = 'PRIVATE',
+}
+
+/** 频道形态：文字 / 语音 / 直播 */
+export enum ChannelKind {
+  TEXT = 'TEXT',
+  VOICE = 'VOICE',
+  LIVE = 'LIVE',
 }
 
 /**
@@ -15,6 +22,8 @@ export interface Channel {
   id: string;
   name: string;
   type: ChannelType;
+  kind?: ChannelKind;
+  serverId?: string | null;
   description?: string;
   ownerId: string;
   owner?: {
@@ -51,6 +60,8 @@ export interface ChannelMember {
 export interface CreateChannelRequest {
   name: string;
   type: ChannelType;
+  kind?: ChannelKind;
+  serverId?: string;
   description?: string;
   password?: string;
   requiresApproval: boolean;
