@@ -22,7 +22,7 @@ export function PinnedMessagesBar({
   const byId = new Map(messages.map((m) => [m.id, m]));
 
   return (
-    <div className="mb-2 flex flex-wrap gap-1.5 border-b border-border-color/80 pb-2">
+    <div className="flex flex-wrap gap-1.5">
       <span className="self-center text-[10px] font-semibold uppercase tracking-wide text-text-muted">
         置顶
       </span>

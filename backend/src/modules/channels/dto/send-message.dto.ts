@@ -36,4 +36,9 @@ export class SendMessageDto {
   @IsString()
   @MaxLength(200)
   attachmentMime?: string;
+
+  /** 被回复的消息 id（须为同频道内已存在消息） */
+  @IsOptional()
+  @IsString()
+  replyToId?: string;
 }

@@ -89,6 +89,8 @@ model Message {
   attachmentUrl   String?
   attachmentName  String?
   attachmentMime  String?
+  // 回复引用的消息 id（同频道内）
+  replyToId       String?
   sequence        Int      @default(0) // 消息序列号，用于排序和增量同步
   status          String   @default("SENT") // 消息状态：SENT, DELIVERED, FAILED
   createdAt       DateTime @default(now())
@@ -96,9 +98,12 @@ model Message {
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replyTo Message?  @relation("MessageThread", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies Message[] @relation("MessageThread")
 
   @@index([channelId, sequence]) // 按序列号索引
   @@index([channelId, createdAt(sort: Desc)])
   @@index([userId])
+  @@index([replyToId])
   @@map("messages")
 }

@@ -15,6 +15,7 @@ import { Channel } from '@/types/channel.types';
 import { channelApi } from '@/services/api/channel.api';
 import { authApi } from '@/services/api/auth.api';
 import { resolveUploadUrl } from '@/lib/mediaUrl';
+import { mapChannelMessage, messageToReplyRef } from '@/lib/mapChannelMessage';
 import { loadChannelPins, toggleChannelPin } from '@/lib/pinnedMessages';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
 
@@ -54,6 +55,8 @@ export default function HomePage() {
           : undefined,
         attachmentName: payload.attachmentName,
         attachmentMime: payload.attachmentMime,
+        replyToId: payload.replyToId,
+        replyTo: replyTo ? messageToReplyRef(replyTo) : null,
       });
 
       const response = await fetch(
@@ -72,6 +75,7 @@ export default function HomePage() {
             attachmentUrl: payload.attachmentUrl,
             attachmentName: payload.attachmentName,
             attachmentMime: payload.attachmentMime,
+            replyToId: payload.replyToId,
           }),
         },
       );
@@ -88,23 +92,9 @@ export default function HomePage() {
         setUser((prev) => (prev ? { ...prev, id: backendUserId } : prev));
       }
 
-      messageListRef.current?.replaceTemp(tempId, {
-        id: result.id,
-        channelId: result.channelId,
-        userId: backendUserId || user.id,
-        username: result.user?.username || user.username,
-        avatar: result.user?.avatar,
-        content: result.content ?? '',
-        type: result.type || 'TEXT',
-        createdAt: result.createdAt,
-        attachmentUrl: result.attachmentUrl
-          ? resolveUploadUrl(result.attachmentUrl)
-          : undefined,
-        attachmentName: result.attachmentName,
-        attachmentMime: result.attachmentMime,
-      });
+      messageListRef.current?.replaceTemp(tempId, mapChannelMessage(result));
     },
-    [selectedChannel, user, token],
+    [selectedChannel, user, token, replyTo],
   );
 
   const handleMessageSend = useCallback(
@@ -419,7 +409,7 @@ export default function HomePage() {
                           松开鼠标发送文件
                         </div>
                       )}
-                      <div className="min-h-0 flex-1 overflow-y-auto">
+                      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                         <MessageList
                           ref={messageListRef}
                           channelId={selectedChannel.id}

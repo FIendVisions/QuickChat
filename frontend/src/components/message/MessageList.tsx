@@ -7,8 +7,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import { messageApi } from '@/services/api/message.api';
 import { useWebSocket } from '@/contexts/WebSocketContext';
-import { resolveUploadUrl } from '@/lib/mediaUrl';
-import { messageToPlainText } from '@/lib/messagePlainText';
+import { mapChannelMessage } from '@/lib/mapChannelMessage';
+import { messageToPlainText, replyRefSnippetPlain } from '@/lib/messagePlainText';
 import type { ChatMessage } from '@/types/message.types';
 import { MessageContextMenu } from './MessageContextMenu';
 import { PinnedMessagesBar } from './PinnedMessagesBar';
@@ -57,22 +57,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
         isLoadingRef.current = true;
 
         const data = await messageApi.getMessages(channelId, 1, 50);
-        const mapped: Message[] = (data.messages || []).map((msg: any) => ({
-          id: msg.id,
-          userId: msg.userId,
-          username: msg.username || msg.user?.username || '未知用户',
-          avatar: msg.avatar || msg.user?.avatar,
-          content: msg.content ?? '',
-          createdAt: msg.createdAt,
-          type: msg.type || 'TEXT',
-          channelId: msg.channelId,
-          attachmentUrl:
-            msg.attachmentUrl != null && String(msg.attachmentUrl).length > 0
-              ? resolveUploadUrl(String(msg.attachmentUrl))
-              : undefined,
-          attachmentName: msg.attachmentName,
-          attachmentMime: msg.attachmentMime,
-        }));
+        const mapped: Message[] = (data.messages || []).map((msg: any) => mapChannelMessage(msg));
         setMessages(mapped);
       } catch (error) {
         console.error('❌ 加载历史消息失败:', error);
@@ -146,22 +131,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
 
         if (data.userId === userId) return;
 
-        const normalized: Message = {
-          id: data.id,
-          channelId: data.channelId,
-          userId: data.userId,
-          username: data.username || '未知用户',
-          avatar: data.avatar,
-          content: data.content ?? '',
-          type: data.type || 'TEXT',
-          createdAt: data.createdAt,
-          attachmentUrl:
-            data.attachmentUrl != null && String(data.attachmentUrl).length > 0
-              ? resolveUploadUrl(String(data.attachmentUrl))
-              : undefined,
-          attachmentName: data.attachmentName,
-          attachmentMime: data.attachmentMime,
-        };
+        const normalized: Message = mapChannelMessage(data);
 
         setMessages((prev) => {
           if (prev.some((m) => m.id === normalized.id)) return prev;
@@ -232,10 +202,23 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
             onPin={() => onTogglePin?.(menu.message.id)}
             isPinned={pinnedIds.includes(menu.message.id)}
             canPin={!menu.message.id.startsWith('temp-')}
+            canReply={!menu.message.id.startsWith('temp-')}
           />
         )}
 
-        <div className="flex-1 overflow-y-auto p-4" ref={scrollRef}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {pinnedIds.length > 0 && (
+            <div className="shrink-0 border-b border-border-color bg-bg-primary px-4 py-2">
+              <PinnedMessagesBar
+                pinnedIds={pinnedIds}
+                messages={messages}
+                onJump={(id) => scrollToMessage(id)}
+                onUnpin={(id) => onTogglePin?.(id)}
+              />
+            </div>
+          )}
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4" ref={scrollRef}>
           {isLoading && (
             <div className="flex h-full items-center justify-center">
               <div className="text-center text-text-muted">
@@ -257,13 +240,6 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
 
           {!isLoading && messages.length > 0 && (
             <div className="space-y-3">
-              <PinnedMessagesBar
-                pinnedIds={pinnedIds}
-                messages={messages}
-                onJump={(id) => scrollToMessage(id)}
-                onUnpin={(id) => onTogglePin?.(id)}
-              />
-
               {messages.map((message, index) => {
                 const showDate =
                   index === 0 ||
@@ -287,6 +263,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
                     <MessageItem
                       message={message}
                       currentUserId={userId}
+                      onQuoteClick={(id) => scrollToMessage(id)}
                       onContextMenu={
                         message.type === 'SYSTEM'
                           ? undefined
@@ -300,6 +277,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
           )}
 
           <div ref={messagesEndRef} />
+          </div>
         </div>
       </>
     );
@@ -310,9 +288,10 @@ interface MessageItemProps {
   message: Message;
   currentUserId: string;
   onContextMenu?: (e: React.MouseEvent) => void;
+  onQuoteClick?: (messageId: string) => void;
 }
 
-function MessageItem({ message, currentUserId, onContextMenu }: MessageItemProps) {
+function MessageItem({ message, currentUserId, onContextMenu, onQuoteClick }: MessageItemProps) {
   const isSystem = message.type === 'SYSTEM';
   const isCurrentUser = message.userId === currentUserId;
   const isImage = message.type === 'IMAGE' || (message.attachmentMime?.startsWith('image/') && message.attachmentUrl);
@@ -375,6 +354,34 @@ function MessageItem({ message, currentUserId, onContextMenu }: MessageItemProps
               : 'bg-bg-tertiary text-text-normal rounded-bl-sm'
           }`}
         >
+          {message.replyTo && (
+            <button
+              type="button"
+              title="跳转到被回复的消息"
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuoteClick?.(message.replyTo!.id);
+              }}
+              className={`mb-1.5 block w-full max-w-full rounded-md border-l-2 border-primary px-2 py-1 text-left transition hover:opacity-95 ${
+                isCurrentUser
+                  ? 'border-white/80 bg-black/15 text-white'
+                  : 'border-primary/80 bg-bg-primary/40 text-text-muted'
+              }`}
+            >
+              <span
+                className={`text-[11px] font-semibold ${isCurrentUser ? 'text-white' : 'text-primary'}`}
+              >
+                @{message.replyTo.username}
+              </span>
+              <span
+                className={`block truncate text-[11px] leading-snug ${
+                  isCurrentUser ? 'text-white/85' : 'opacity-90'
+                }`}
+              >
+                {replyRefSnippetPlain(message.replyTo)}
+              </span>
+            </button>
+          )}
           {isImage && message.attachmentUrl && (
             <a href={message.attachmentUrl} target="_blank" rel="noreferrer" className="block">
               {/* eslint-disable-next-line @next/next/no-img-element */}

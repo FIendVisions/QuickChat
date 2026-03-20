@@ -13,6 +13,8 @@ interface MessageContextMenuProps {
   isPinned: boolean;
   /** 临时消息等不可置顶时传 false，隐藏置顶项 */
   canPin?: boolean;
+  /** 临时消息等不可回复时传 false，隐藏回复项 */
+  canReply?: boolean;
 }
 
 export function MessageContextMenu({
@@ -24,6 +26,7 @@ export function MessageContextMenu({
   onPin,
   isPinned,
   canPin = true,
+  canReply = true,
 }: MessageContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -64,10 +67,12 @@ export function MessageContextMenu({
       style={{ left: x, top: y }}
       role="menu"
     >
-      <button type="button" className={item} onClick={() => { onReply(); onClose(); }}>
-        <Reply size={16} className="text-text-muted" />
-        回复
-      </button>
+      {canReply && (
+        <button type="button" className={item} onClick={() => { onReply(); onClose(); }}>
+          <Reply size={16} className="text-text-muted" />
+          回复
+        </button>
+      )}
       <button type="button" className={item} onClick={() => { onCopy(); onClose(); }}>
         <Copy size={16} className="text-text-muted" />
         拷贝文本

@@ -6,16 +6,9 @@ import { useState, useRef, FormEvent } from 'react';
 import { Send, Smile, Paperclip, ImageIcon, X } from 'lucide-react';
 import { messageApi } from '@/services/api/message.api';
 import { channelApi } from '@/services/api/channel.api';
-import { messageToPlainText } from '@/lib/messagePlainText';
+import { messageToReplyRef } from '@/lib/mapChannelMessage';
+import { replyRefSnippetPlain } from '@/lib/messagePlainText';
 import type { ChatMessage, SendMessagePayload } from '@/types/message.types';
-
-function buildReplyPrefix(replyTo: ChatMessage): string {
-  const plain = messageToPlainText(replyTo);
-  const oneLine = plain.replace(/\n/g, ' ');
-  const snippet = oneLine.slice(0, 80);
-  const suffix = oneLine.length > 80 ? '…' : '';
-  return `「回复 @${replyTo.username}：${snippet}${suffix}」\n`;
-}
 
 interface MessageInputProps {
   channelId: string;
@@ -41,16 +34,17 @@ export function MessageInput({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const withReplyContent = (content: string) =>
-    replyTo ? `${buildReplyPrefix(replyTo)}${content}` : content;
-
   const sendPayload = async (payload: SendMessagePayload) => {
     const userId = currentUserId || localStorage.getItem('userId') || 'anonymous';
     const username = currentUsername || localStorage.getItem('username') || '匿名用户';
 
+    const replyToId =
+      replyTo && !replyTo.id.startsWith('temp-') ? replyTo.id : undefined;
+
     const outgoing: SendMessagePayload = {
       ...payload,
-      content: withReplyContent(payload.content ?? ''),
+      content: payload.content ?? '',
+      replyToId,
     };
 
     if (onSend) {
@@ -64,6 +58,7 @@ export function MessageInput({
       attachmentUrl: outgoing.attachmentUrl,
       attachmentName: outgoing.attachmentName,
       attachmentMime: outgoing.attachmentMime,
+      replyToId: outgoing.replyToId,
     });
   };
 
@@ -130,7 +125,9 @@ export function MessageInput({
           <span className="min-w-0 flex-1 text-text-muted">
             <span className="font-medium text-primary">回复</span>{' '}
             <span className="text-text-normal">@{replyTo.username}</span>
-            <span className="block truncate opacity-80">{messageToPlainText(replyTo)}</span>
+            <span className="block truncate opacity-80">
+              {replyRefSnippetPlain(messageToReplyRef(replyTo))}
+            </span>
           </span>
           <button
             type="button"

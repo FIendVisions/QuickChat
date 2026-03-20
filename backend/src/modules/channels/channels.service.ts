@@ -446,6 +446,17 @@ export class ChannelsService {
               avatar: true,
             },
           },
+          replyTo: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  avatar: true,
+                },
+              },
+            },
+          },
         },
         orderBy: {
           createdAt: 'desc',
@@ -454,8 +465,9 @@ export class ChannelsService {
       this.prisma.message.count({ where: { channelId } }),
     ]);
 
+    const chronological = messages.reverse();
     return {
-      messages: messages.reverse(), // 按时间正序返回
+      messages: chronological.map((m) => this.serializeChannelMessage(m)),
       total,
       page,
       pageSize,
@@ -557,6 +569,18 @@ export class ChannelsService {
       }
     }
 
+    let replyToId: string | null = null;
+    const rawReplyId = dto.replyToId?.trim();
+    if (rawReplyId) {
+      const parent = await this.prisma.message.findFirst({
+        where: { id: rawReplyId, channelId },
+      });
+      if (!parent) {
+        throw new BadRequestException('被回复的消息不存在或不在当前频道');
+      }
+      replyToId = rawReplyId;
+    }
+
     // 生成序列号
     const sequence = await this.sequenceGenerator.getNextSequence(channelId);
 
@@ -570,6 +594,7 @@ export class ChannelsService {
         attachmentUrl: attachmentUrl || null,
         attachmentName: dto.attachmentName?.trim() || null,
         attachmentMime: dto.attachmentMime?.trim() || null,
+        replyToId,
         sequence,
         status: 'SENT',
       },
@@ -581,44 +606,90 @@ export class ChannelsService {
             avatar: true,
           },
         },
+        replyTo: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                avatar: true,
+              },
+            },
+          },
+        },
       },
     });
 
     this.logger.log(`📨 [MESSAGE] Message ${message.id} created (seq: ${sequence}) in channel ${channelId} by user ${dto.userId}`);
 
-    const rawCreated = message.createdAt;
-    const createdAtIso =
-      rawCreated instanceof Date
-        ? rawCreated.toISOString()
-        : typeof rawCreated === 'string'
-          ? rawCreated
-          : new Date(rawCreated as unknown as string).toISOString();
-
-    // 通过 WebSocket 广播（纯 JSON 可序列化字段，避免其他客户端丢 attachment）
-    const broadcastData = {
-      id: message.id,
-      channelId: message.channelId,
-      userId: message.userId,
-      username: message.user.username,
-      avatar: message.user.avatar ?? null,
-      content: (message.content || '').trim(),
-      type: message.type,
-      sequence: message.sequence,
-      status: message.status,
-      createdAt: createdAtIso,
-      attachmentUrl: message.attachmentUrl ?? null,
-      attachmentName: message.attachmentName ?? null,
-      attachmentMime: message.attachmentMime ?? null,
-    };
+    const payload = this.serializeChannelMessage(message);
 
     // 标记消息为待确认
     this.messageAck.markPending(channelId, message.id);
 
     // 广播到频道（所有用户，包括发送者）
-    const recipientCount = this.websocketGateway.sendToChannel(channelId, 'message:new', broadcastData);
+    const recipientCount = this.websocketGateway.sendToChannel(channelId, 'message:new', payload);
     this.logger.log(`📡 [BROADCAST] Message ${message.id} (seq: ${sequence}) sent to ${recipientCount} recipient(s)`);
 
-    return message;
+    return payload;
+  }
+
+  private toIso(createdAt: Date | string): string {
+    if (createdAt instanceof Date) return createdAt.toISOString();
+    if (typeof createdAt === 'string') return new Date(createdAt).toISOString();
+    return new Date(createdAt as unknown as string).toISOString();
+  }
+
+  /** 被引用消息的精简快照（前端展示 / 解析用） */
+  private serializeReplySnapshot(replyTo: {
+    id: string;
+    userId: string;
+    content: string;
+    type: string;
+    createdAt: Date | string;
+    attachmentUrl: string | null;
+    attachmentName: string | null;
+    attachmentMime: string | null;
+    user?: { id: string; username: string; avatar: string | null } | null;
+  }): Record<string, unknown> {
+    return {
+      id: replyTo.id,
+      userId: replyTo.userId,
+      username: replyTo.user?.username ?? '未知用户',
+      avatar: replyTo.user?.avatar ?? null,
+      content: (replyTo.content ?? '').trim(),
+      type: replyTo.type,
+      createdAt: this.toIso(replyTo.createdAt),
+      attachmentUrl: replyTo.attachmentUrl ?? null,
+      attachmentName: replyTo.attachmentName ?? null,
+      attachmentMime: replyTo.attachmentMime ?? null,
+    };
+  }
+
+  /** 单条频道消息的标准 JSON 形态（含 replyTo 引用快照） */
+  private serializeChannelMessage(message: any): Record<string, unknown> {
+    return {
+      id: message.id,
+      channelId: message.channelId,
+      userId: message.userId,
+      username: message.user?.username ?? '未知用户',
+      avatar: message.user?.avatar ?? null,
+      content: (message.content ?? '').trim(),
+      type: message.type,
+      sequence: message.sequence,
+      status: message.status,
+      createdAt: this.toIso(message.createdAt),
+      attachmentUrl: message.attachmentUrl ?? null,
+      attachmentName: message.attachmentName ?? null,
+      attachmentMime: message.attachmentMime ?? null,
+      replyToId: message.replyToId ?? null,
+      replyTo: message.replyTo ? this.serializeReplySnapshot(message.replyTo) : null,
+      user: {
+        id: message.userId,
+        username: message.user?.username ?? '未知用户',
+        avatar: message.user?.avatar ?? null,
+      },
+    };
   }
 
   /**

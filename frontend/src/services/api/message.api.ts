@@ -46,6 +46,7 @@ export const messageApi = {
       attachmentUrl?: string;
       attachmentName?: string;
       attachmentMime?: string;
+      replyToId?: string;
     },
   ): Promise<any> {
     try {
@@ -60,6 +61,7 @@ export const messageApi = {
           attachmentUrl: payload.attachmentUrl,
           attachmentName: payload.attachmentName,
           attachmentMime: payload.attachmentMime,
+          replyToId: payload.replyToId,
         }),
       });
 
